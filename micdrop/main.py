@@ -254,6 +254,9 @@ class MicDropApp:
         self.root.bind("<Control-f>", self._focus_search)
         self.root.bind("<Escape>", self._on_escape)
         self.root.bind("<space>", self._on_space)
+        # Don't let Space activate a focused button (e.g. re-opening Add clips).
+        for seq in ("<KeyPress-space>", "<KeyRelease-space>", "<Key-space>"):
+            self.root.unbind_class("TButton", seq)
 
     # ===================================================================
     # Clip grid
@@ -619,8 +622,9 @@ class MicDropApp:
         return "break"
 
     def _on_space(self, _event: tk.Event) -> str | None:
+        # Space stops playback, but must still type normally in text inputs.
         w = self.root.focus_get()
-        if isinstance(w, (tk.Entry, ttk.Entry, tk.Spinbox, ttk.Spinbox, tk.Button, ttk.Button)):
+        if isinstance(w, (tk.Entry, ttk.Entry, tk.Spinbox, ttk.Spinbox)):
             return None
         self._stop()
         return "break"
