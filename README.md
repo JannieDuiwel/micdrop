@@ -89,19 +89,18 @@ If a hotkey won't fire over a fullscreen game, try running the app **as administ
 
 ## Standalone build
 
-Build a version that runs without a Python install:
+Build a single `.exe` that runs without a Python install:
 
 ```powershell
 .\.venv\Scripts\pip install -r requirements-build.txt
 .\.venv\Scripts\pyinstaller MicDrop.spec
 ```
 
-This produces **`dist\MicDrop\MicDrop.exe`** — a one-folder build with the audio libraries
-(PortAudio, libsndfile) bundled. Zip `dist\MicDrop` to distribute it.
-
-Run `MicDrop.exe` to launch; settings are stored under `%APPDATA%\MicDrop`. The machine
-still needs **SteelSeries Sonar** or **VoiceMeeter** for the virtual mic. Windows
-SmartScreen may warn on first run of an unsigned `.exe` (**More info ▸ Run anyway**).
+This produces one file, **`dist\MicDrop.exe`**, with the audio libraries (PortAudio,
+libsndfile) bundled. Copy it anywhere and run it — settings are stored under
+`%APPDATA%\MicDrop`. The machine still needs **SteelSeries Sonar** or **VoiceMeeter** for
+the virtual mic. Windows SmartScreen may warn on first run of an unsigned `.exe`
+(**More info ▸ Run anyway**).
 
 ---
 
