@@ -138,6 +138,7 @@ class Player:
     def __init__(self) -> None:
         self.volume: float = 1.0
         self._cache: dict[tuple, np.ndarray] = {}
+        self._chime_cache: dict[int, np.ndarray] = {}
         self._primary: _Voice | None = None
         self._monitor: _Voice | None = None
         self._lock = threading.Lock()
@@ -202,14 +203,54 @@ class Player:
             self._prepare(path, sr)
 
     # -- playback ---------------------------------------------------------
-    def play(self, path: str) -> float:
-        """Play a clip to all active devices. Returns duration; raises on failure."""
+    def play(self, path: str, gain: float = 1.0) -> float:
+        """Play a clip to all active devices. Returns duration; raises on failure.
+
+        `gain` is a per-clip multiplier applied on top of the master volume.
+        """
         voices = [v for v in (self._primary, self._monitor) if v is not None]
         if not voices:
             raise RuntimeError("No output device selected")
+        level = self.volume * max(0.0, gain)
         duration = 0.0
         for v in voices:
             data = self._prepare(path, v.samplerate)
+            if v.channels == 1:
+                data = data.mean(axis=1, keepdims=True).astype("float32")
+            out = np.ascontiguousarray(data * level, dtype="float32")
+            v.play(out)
+            duration = max(duration, out.shape[0] / v.samplerate)
+        return duration
+
+    def _make_chime(self, samplerate: int) -> np.ndarray:
+        """A short two-tone 'di-ding' as contiguous float32 stereo, click-free."""
+        cached = self._chime_cache.get(samplerate)
+        if cached is not None:
+            return cached
+        seg = 0.09  # seconds per tone
+        fade = max(1, int(samplerate * 0.008))
+        ramp = np.linspace(0.0, 1.0, fade, dtype="float32")
+        parts = []
+        for freq in (880.0, 1320.0):
+            n = int(samplerate * seg)
+            t = np.arange(n, dtype="float32") / samplerate
+            wave = np.sin(2 * np.pi * freq * t).astype("float32")
+            wave[:fade] *= ramp
+            wave[-fade:] *= ramp[::-1]
+            parts.append(wave)
+        mono = np.concatenate(parts) * np.float32(0.3)
+        stereo = np.ascontiguousarray(np.repeat(mono[:, None], 2, axis=1), dtype="float32")
+        self._chime_cache[samplerate] = stereo
+        return stereo
+
+    def play_chime(self) -> float:
+        """Play the chime to all active devices (scaled by master volume). Returns duration."""
+        voices = [v for v in (self._primary, self._monitor) if v is not None]
+        if not voices:
+            return 0.0
+        duration = 0.0
+        for v in voices:
+            data = self._make_chime(v.samplerate)
             if v.channels == 1:
                 data = data.mean(axis=1, keepdims=True).astype("float32")
             out = np.ascontiguousarray(data * self.volume, dtype="float32")

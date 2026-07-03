@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 
 # config.json lives in the project root, next to the micdrop/ package.
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -19,6 +19,13 @@ class Clip:
     path: str
     label: str
     hotkey: str = ""  # e.g. "ctrl+alt+1"; empty = no hotkey
+    volume: float = 1.0  # per-clip gain (0.0–1.0), multiplied with master volume
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Clip":
+        """Build a Clip, ignoring unknown keys so newer configs never crash us."""
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in d.items() if k in known})
 
 
 @dataclass
@@ -30,6 +37,9 @@ class Config:
     master_volume: float = 0.8
     hotkeys_enabled: bool = True
     stop_hotkey: str = "ctrl+alt+s"
+    theme: str = "dark"  # "dark" | "light"
+    play_delay_ms: int = 0  # global delay before a clip plays (after the chime)
+    chime_enabled: bool = False  # play a short chime before each clip
     clips: list[Clip] = field(default_factory=list)
 
     # -- serialisation ----------------------------------------------------
@@ -39,7 +49,10 @@ class Config:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Config":
-        clips = [Clip(**c) for c in d.get("clips", [])]
+        clips = [Clip.from_dict(c) for c in d.get("clips", []) if isinstance(c, dict)]
+        theme = d.get("theme", "dark")
+        if theme not in ("dark", "light"):
+            theme = "dark"
         return cls(
             output_device_name=d.get("output_device_name", ""),
             output_device_hostapi=d.get("output_device_hostapi", ""),
@@ -48,6 +61,9 @@ class Config:
             master_volume=float(d.get("master_volume", 0.8)),
             hotkeys_enabled=bool(d.get("hotkeys_enabled", True)),
             stop_hotkey=d.get("stop_hotkey", "ctrl+alt+s"),
+            theme=theme,
+            play_delay_ms=int(d.get("play_delay_ms", 0)),
+            chime_enabled=bool(d.get("chime_enabled", False)),
             clips=clips,
         )
 

@@ -16,20 +16,21 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import sounddevice as sd
 
-from . import audio, config, hotkeys
+from . import audio, config, hotkeys, theme
 
 AUDIO_FILETYPES = [
     ("Audio files", "*.wav *.flac *.ogg *.mp3 *.aiff *.aif"),
     ("All files", "*.*"),
 ]
-GRID_COLUMNS = 3
+TILE_MIN_WIDTH = 210  # px; number of grid columns adapts to the window width
+_ASSETS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
 
 
 class MicDropApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("MicDrop")
-        self.root.geometry("740x580")
+        self.root.geometry("760x600")
         self.root.minsize(560, 420)
 
         self.cfg = config.load_config()
@@ -39,17 +40,28 @@ class MicDropApp:
 
         self._cmd_q: queue.Queue = queue.Queue()
         self._last_played = ""
+        self._playing_index: int | None = None
+        self._play_token = 0
         self._capturing = False
         self._devices: list[audio.DeviceInfo] = []
         self._device_warning = ""
         self._msg = ""
         self._msg_until = 0.0
         self._menu_index = 0
+        self._search = ""
+        self._columns = 3
+        self._tiles: dict[int, tk.Frame] = {}
+        self._hl_index: int | None = None
+
+        self.palette = theme.apply_theme(self.root, self.cfg.theme)
+        self._set_icon()
 
         self._build_menu()
         self._build_top_bar()
+        self._build_options_bar()
         self._build_clip_area()
         self._build_status_bar()
+        self._bind_shortcuts()
 
         self._load_devices()
         self._init_device()
@@ -62,6 +74,14 @@ class MicDropApp:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.after(100, self._pump)
 
+    def _set_icon(self) -> None:
+        icon = os.path.join(_ASSETS, "icon.ico")
+        if os.path.exists(icon):
+            try:
+                self.root.iconbitmap(icon)
+            except tk.TclError:
+                pass
+
     # ===================================================================
     # UI construction
     # ===================================================================
@@ -73,6 +93,16 @@ class MicDropApp:
         filem.add_separator()
         filem.add_command(label="Quit", command=self._on_close)
         menubar.add_cascade(label="File", menu=filem)
+
+        viewm = tk.Menu(menubar, tearoff=0)
+        self.theme_var = tk.StringVar(value=self.cfg.theme)
+        viewm.add_radiobutton(
+            label="Dark theme", variable=self.theme_var, value="dark", command=self._on_theme_change
+        )
+        viewm.add_radiobutton(
+            label="Light theme", variable=self.theme_var, value="light", command=self._on_theme_change
+        )
+        menubar.add_cascade(label="View", menu=viewm)
 
         hk = tk.Menu(menubar, tearoff=0)
         self.hk_enabled_var = tk.BooleanVar(value=self.cfg.hotkeys_enabled)
@@ -90,10 +120,9 @@ class MicDropApp:
         menubar.add_cascade(label="Help", menu=helpm)
 
         self.root.config(menu=menubar)
-        self.root.bind("<Control-o>", lambda e: self._add_clips())
 
     def _build_top_bar(self) -> None:
-        bar = ttk.Frame(self.root, padding=8)
+        bar = ttk.Frame(self.root, padding=(8, 8, 8, 4))
         bar.pack(side=tk.TOP, fill=tk.X)
 
         ttk.Label(bar, text="Mic output (others hear):").grid(row=0, column=0, sticky="w")
@@ -122,16 +151,42 @@ class MicDropApp:
 
         side = ttk.Frame(bar)
         side.grid(row=0, column=2, rowspan=3, padx=(10, 0))
-        ttk.Button(side, text="■  Stop", command=self.player.stop).pack(fill=tk.X)
-        ttk.Button(side, text="＋  Add clips", command=self._add_clips).pack(fill=tk.X, pady=(4, 0))
+        ttk.Button(side, text="■  Stop", style="Danger.TButton", command=self._stop).pack(fill=tk.X)
+        ttk.Button(
+            side, text="＋  Add clips", style="Accent.TButton", command=self._add_clips
+        ).pack(fill=tk.X, pady=(6, 0))
 
         bar.columnconfigure(1, weight=1)
+
+    def _build_options_bar(self) -> None:
+        bar = ttk.Frame(self.root, padding=(8, 0, 8, 6))
+        bar.pack(side=tk.TOP, fill=tk.X)
+
+        ttk.Label(bar, text="🔎 Search:").pack(side=tk.LEFT)
+        self.search_var = tk.StringVar()
+        self.search_entry = ttk.Entry(bar, textvariable=self.search_var)
+        self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 14))
+        self.search_var.trace_add("write", lambda *_: self._on_search())
+
+        # Right group (packed right-to-left): [Delay (ms):] [spin]   [ ] Chime
+        self.chime_var = tk.BooleanVar(value=self.cfg.chime_enabled)
+        ttk.Checkbutton(
+            bar, text="Chime before clip", variable=self.chime_var, command=self._on_chime_toggle
+        ).pack(side=tk.RIGHT)
+        self.delay_spin = ttk.Spinbox(
+            bar, from_=0, to=5000, increment=100, width=6, command=self._on_delay_change
+        )
+        self.delay_spin.set(int(self.cfg.play_delay_ms))
+        self.delay_spin.pack(side=tk.RIGHT, padx=(6, 16))
+        self.delay_spin.bind("<FocusOut>", lambda e: self._on_delay_change())
+        self.delay_spin.bind("<Return>", lambda e: self._on_delay_change())
+        ttk.Label(bar, text="Delay (ms):").pack(side=tk.RIGHT)
 
     def _build_clip_area(self) -> None:
         container = ttk.Frame(self.root)
         container.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=8)
 
-        self.canvas = tk.Canvas(container, highlightthickness=0)
+        self.canvas = tk.Canvas(container, highlightthickness=0, bg=self.palette["bg"])
         vbar = ttk.Scrollbar(container, orient="vertical", command=self.canvas.yview)
         self.canvas.configure(yscrollcommand=vbar.set)
         vbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -142,15 +197,17 @@ class MicDropApp:
         self.grid_frame.bind(
             "<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         )
-        self.canvas.bind(
-            "<Configure>", lambda e: self.canvas.itemconfigure(self._grid_window, width=e.width)
-        )
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
         self.clip_menu = tk.Menu(self.root, tearoff=0)
         self.clip_menu.add_command(label="Play", command=self._menu_play)
         self.clip_menu.add_command(label="Set / change hotkey…", command=self._menu_set_hotkey)
         self.clip_menu.add_command(label="Clear hotkey", command=self._menu_clear_hotkey)
+        self.clip_menu.add_command(label="Set volume…", command=self._menu_set_volume)
+        self.clip_menu.add_separator()
+        self.clip_menu.add_command(label="Move up", command=lambda: self._menu_move(-1))
+        self.clip_menu.add_command(label="Move down", command=lambda: self._menu_move(1))
         self.clip_menu.add_separator()
         self.clip_menu.add_command(label="Rename…", command=self._menu_rename)
         self.clip_menu.add_command(label="Remove", command=self._menu_remove)
@@ -160,39 +217,156 @@ class MicDropApp:
     def _build_status_bar(self) -> None:
         self.status_var = tk.StringVar(value="Ready")
         ttk.Label(
-            self.root, textvariable=self.status_var, relief="sunken", anchor="w", padding=(6, 2)
+            self.root, textvariable=self.status_var, style="Status.TLabel", anchor="w"
         ).pack(side=tk.BOTTOM, fill=tk.X)
+
+    def _bind_shortcuts(self) -> None:
+        self.root.bind("<Control-o>", lambda e: self._add_clips())
+        self.root.bind("<Control-f>", self._focus_search)
+        self.root.bind("<Escape>", self._on_escape)
+        self.root.bind("<space>", self._on_space)
 
     # ===================================================================
     # Clip grid
     # ===================================================================
+    def _compute_columns(self, width: int) -> int:
+        return max(1, int(width) // TILE_MIN_WIDTH)
+
+    def _on_canvas_configure(self, event: tk.Event) -> None:
+        self.canvas.itemconfigure(self._grid_window, width=event.width)
+        cols = self._compute_columns(event.width)
+        if cols != self._columns:
+            self._columns = cols
+            self._build_clip_buttons()
+
+    def _empty_label(self, text: str) -> None:
+        lbl = tk.Label(
+            self.grid_frame,
+            text=text,
+            bg=self.palette["bg"],
+            fg=self.palette["muted"],
+            font=theme.FONT_BASE,
+            justify="center",
+        )
+        lbl.grid(row=0, column=0, padx=30, pady=40)
+        self.grid_frame.columnconfigure(0, weight=1, uniform="")
+
     def _build_clip_buttons(self) -> None:
         for child in self.grid_frame.winfo_children():
             child.destroy()
+        self._tiles = {}
+        self._hl_index = None
+
+        # Reset any column weights from a previous (wider) layout.
+        for c in range(24):
+            self.grid_frame.columnconfigure(c, weight=0, uniform="")
 
         if not self.cfg.clips:
-            ttk.Label(
-                self.grid_frame,
-                text="No clips yet.\n\nClick  ＋ Add clips  to choose audio files,\nthen right-click a button to assign a hotkey.",
-                anchor="center",
-                justify="center",
-                padding=30,
-            ).grid(row=0, column=0)
+            self._empty_label(
+                "No clips yet.\n\nClick  ＋ Add clips  to choose audio files,\n"
+                "then right-click a tile to assign a hotkey or set its volume."
+            )
             return
 
-        for col in range(GRID_COLUMNS):
-            self.grid_frame.columnconfigure(col, weight=1, uniform="clipcol")
+        items = list(enumerate(self.cfg.clips))
+        if self._search:
+            items = [(i, c) for (i, c) in items if self._search in c.label.lower()]
+        if not items:
+            self._empty_label(f"No clips match “{self.search_var.get()}”.")
+            return
 
-        for i, clip in enumerate(self.cfg.clips):
-            row, col = divmod(i, GRID_COLUMNS)
-            label = clip.label
-            if clip.hotkey:
-                label += f"\n⌨ {clip.hotkey}"
-            btn = ttk.Button(
-                self.grid_frame, text=label, command=lambda c=clip: self.trigger_play(c)
+        cols = max(1, self._columns)
+        for c in range(cols):
+            self.grid_frame.columnconfigure(c, weight=1, uniform="clipcol")
+        avail = self.canvas.winfo_width() or 720
+        wraplen = max(110, avail // cols - 44)
+
+        for pos, (i, clip) in enumerate(items):
+            row, col = divmod(pos, cols)
+            tile = self._make_tile(self.grid_frame, clip, i, wraplen)
+            tile.grid(row=row, column=col, sticky="nsew", padx=5, pady=5)
+            self._tiles[i] = tile
+
+    def _tile_border(self, index: int) -> str:
+        if index == self._playing_index and self.player.is_playing():
+            return self.palette["accent"]
+        return self.palette["surface"]
+
+    def _make_tile(self, parent: tk.Widget, clip: config.Clip, index: int, wraplen: int) -> tk.Frame:
+        p = self.palette
+        border = self._tile_border(index)
+        tile = tk.Frame(
+            parent,
+            bg=p["surface"],
+            highlightthickness=2,
+            highlightbackground=border,
+            highlightcolor=border,
+            cursor="hand2",
+        )
+        name = tk.Label(
+            tile,
+            text=clip.label,
+            bg=p["surface"],
+            fg=p["text"],
+            font=theme.FONT_TILE,
+            wraplength=wraplen,
+            justify="center",
+        )
+        widgets = [tile, name]
+
+        badges = []
+        if clip.hotkey:
+            badges.append(f"⌨ {clip.hotkey}")
+        if abs(getattr(clip, "volume", 1.0) - 1.0) > 1e-3:
+            badges.append(f"🔊 {int(round(clip.volume * 100))}%")
+        if badges:
+            name.pack(fill="x", padx=10, pady=(12, 2))
+            badge = tk.Label(
+                tile, text="   ".join(badges), bg=p["surface"], fg=p["muted"], font=theme.FONT_BADGE
             )
-            btn.grid(row=row, column=col, sticky="nsew", padx=4, pady=4, ipady=10)
-            btn.bind("<Button-3>", lambda e, idx=i: self._popup_menu(e, idx))
+            badge.pack(pady=(0, 12))
+            widgets.append(badge)
+        else:
+            name.pack(fill="x", padx=10, pady=16)
+
+        def set_bg(color: str) -> None:
+            for w in widgets:
+                w.configure(bg=color)
+
+        def on_enter(_e: tk.Event) -> None:
+            set_bg(p["surface_hover"])
+            tile.configure(highlightbackground=p["surface_hover"], highlightcolor=p["surface_hover"])
+
+        def check_leave() -> None:
+            under = self.root.winfo_containing(*self.root.winfo_pointerxy())
+            if under not in widgets:
+                set_bg(p["surface"])
+                b = self._tile_border(index)
+                tile.configure(highlightbackground=b, highlightcolor=b)
+
+        def on_leave(_e: tk.Event) -> None:
+            self.root.after_idle(check_leave)
+
+        for w in widgets:
+            w.bind("<Enter>", on_enter)
+            w.bind("<Leave>", on_leave)
+            w.bind("<Button-1>", lambda _e, c=clip: self.trigger_play(c))
+            w.bind("<Button-3>", lambda e, idx=index: self._popup_menu(e, idx))
+        return tile
+
+    def _refresh_highlight(self) -> None:
+        playing = self._playing_index if self.player.is_playing() else None
+        if playing == self._hl_index:
+            return
+        old = self._tiles.get(self._hl_index) if self._hl_index is not None else None
+        if old is not None:
+            s = self.palette["surface"]
+            old.configure(highlightbackground=s, highlightcolor=s)
+        new = self._tiles.get(playing) if playing is not None else None
+        if new is not None:
+            a = self.palette["accent"]
+            new.configure(highlightbackground=a, highlightcolor=a)
+        self._hl_index = playing
 
     def _popup_menu(self, event: tk.Event, index: int) -> None:
         self._menu_index = index
@@ -220,6 +394,30 @@ class MicDropApp:
             self._build_clip_buttons()
             self._apply_hotkeys()
 
+    def _menu_set_volume(self) -> None:
+        clip = self.cfg.clips[self._menu_index]
+        cur = int(round(getattr(clip, "volume", 1.0) * 100))
+        val = simpledialog.askinteger(
+            "Clip volume",
+            f"Volume for “{clip.label}” (%)\n100 = normal, up to 200 to boost:",
+            initialvalue=cur,
+            minvalue=0,
+            maxvalue=200,
+            parent=self.root,
+        )
+        if val is not None:
+            clip.volume = val / 100.0
+            self._save()
+            self._build_clip_buttons()
+
+    def _menu_move(self, delta: int) -> None:
+        i = self._menu_index
+        j = i + delta
+        if 0 <= j < len(self.cfg.clips):
+            self.cfg.clips[i], self.cfg.clips[j] = self.cfg.clips[j], self.cfg.clips[i]
+            self._save()
+            self._build_clip_buttons()
+
     def _menu_rename(self) -> None:
         clip = self.cfg.clips[self._menu_index]
         new = simpledialog.askstring(
@@ -231,7 +429,12 @@ class MicDropApp:
             self._build_clip_buttons()
 
     def _menu_remove(self) -> None:
-        clip = self.cfg.clips.pop(self._menu_index)
+        clip = self.cfg.clips[self._menu_index]
+        if not messagebox.askyesno(
+            "Remove clip", f"Remove “{clip.label}” from the board?", parent=self.root
+        ):
+            return
+        self.cfg.clips.pop(self._menu_index)
         if clip.hotkey:
             self.hotkeys.unbind(clip.hotkey)
         self._save()
@@ -332,15 +535,67 @@ class MicDropApp:
         self._warm_cache()
 
     # ===================================================================
-    # Volume
+    # Volume / delay / chime / theme / search
     # ===================================================================
     def _on_volume(self, value: str) -> None:
         v = float(value) / 100.0
         self.player.set_volume(v)
         self.cfg.master_volume = v
 
+    def _on_delay_change(self) -> None:
+        raw = self.delay_spin.get()
+        try:
+            v = int(float(raw))
+        except (TypeError, ValueError):
+            v = 0
+        v = max(0, min(5000, v))
+        if str(v) != str(raw):
+            self.delay_spin.set(v)
+        if v != self.cfg.play_delay_ms:
+            self.cfg.play_delay_ms = v
+            self._save()
+
+    def _on_chime_toggle(self) -> None:
+        self.cfg.chime_enabled = self.chime_var.get()
+        self._save()
+        self._set_status("Chime " + ("on" if self.cfg.chime_enabled else "off"), 2)
+
+    def _on_theme_change(self) -> None:
+        mode = self.theme_var.get()
+        self.cfg.theme = mode
+        self.palette = theme.apply_theme(self.root, mode)
+        self.canvas.configure(bg=self.palette["bg"])
+        self._build_clip_buttons()
+        self._save()
+
+    def _on_search(self) -> None:
+        self._search = self.search_var.get().strip().lower()
+        self._build_clip_buttons()
+
+    def _focus_search(self, _event: tk.Event) -> str:
+        self.search_entry.focus_set()
+        self.search_entry.select_range(0, tk.END)
+        return "break"
+
+    def _on_escape(self, _event: tk.Event) -> str:
+        if self.root.focus_get() is self.search_entry:
+            if self.search_var.get():
+                self.search_var.set("")
+            else:
+                self.root.focus_set()
+            return "break"
+        self._stop()
+        return "break"
+
+    def _on_space(self, _event: tk.Event) -> str | None:
+        w = self.root.focus_get()
+        if isinstance(w, (tk.Entry, ttk.Entry, tk.Spinbox, ttk.Spinbox, tk.Button, ttk.Button)):
+            return None
+        self._stop()
+        return "break"
+
     # ===================================================================
-    # Clips: add / play
+    # Clips: add / play / stop
     # ===================================================================
     def _add_clips(self) -> None:
         paths = filedialog.askopenfilenames(title="Add audio clips", filetypes=AUDIO_FILETYPES)
@@ -348,23 +603,43 @@ class MicDropApp:
             return
         for p in paths:
             label = os.path.splitext(os.path.basename(p))[0]
-            self.cfg.clips.append(config.Clip(path=p, label=label, hotkey=""))
+            self.cfg.clips.append(config.Clip(path=p, label=label))
         self._save()
         self._build_clip_buttons()
         self._apply_hotkeys()
         self._warm_cache()
 
     def trigger_play(self, clip: config.Clip) -> None:
-        """Play a clip. Safe to call from any thread (hotkey or GUI)."""
+        """Play a clip: chime → delay → clip. Safe to call from any thread."""
         self._last_played = clip.label
+        self._playing_index = next(
+            (i for i, c in enumerate(self.cfg.clips) if c is clip), None
+        )
+        self._play_token += 1
+        token = self._play_token
+        chime = self.cfg.chime_enabled
+        delay = max(0, self.cfg.play_delay_ms) / 1000.0
+        gain = float(getattr(clip, "volume", 1.0))
 
         def work() -> None:
             try:
-                self.player.play(clip.path)
+                if chime:
+                    dur = self.player.play_chime()
+                    if dur:
+                        time.sleep(dur)
+                if delay:
+                    time.sleep(delay)
+                if token != self._play_token:  # superseded or stopped during pre-roll
+                    return
+                self.player.play(clip.path, gain=gain)
             except Exception as exc:  # noqa: BLE001 - surface any decode/device error
                 self._cmd_q.put(("error", f"Couldn't play '{clip.label}': {exc}"))
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _stop(self) -> None:
+        self._play_token += 1  # cancel any pending chime/delay pre-roll
+        self.player.stop()
 
     def _warm_cache(self) -> None:
         if self.player.device_index is None:
@@ -390,7 +665,7 @@ class MicDropApp:
             if clip.hotkey:
                 mapping[clip.hotkey] = (lambda c=clip: self.trigger_play(c))
         if self.cfg.stop_hotkey:
-            mapping[self.cfg.stop_hotkey] = self.player.stop
+            mapping[self.cfg.stop_hotkey] = self._stop
         errors = self.hotkeys.rebind_all(mapping)
         if errors:
             self._set_status("Hotkey problem: " + "; ".join(errors), 6)
@@ -466,6 +741,8 @@ class MicDropApp:
         except queue.Empty:
             pass
 
+        self._refresh_highlight()
+
         now = time.monotonic()
         if self._capturing:
             text = "🎯 Press a key combination now…  (Esc to cancel)"
@@ -515,10 +792,6 @@ class MicDropApp:
 
 def main() -> None:
     root = tk.Tk()
-    try:
-        ttk.Style().theme_use("vista")
-    except tk.TclError:
-        pass
     MicDropApp(root)
     root.mainloop()
 
