@@ -57,11 +57,18 @@ handling monitoring via A1 you can leave the app's monitor output on **None**.
 
 ## Using it
 
-- **Click** a clip button or press its **global hotkey** to play.
-- **Master volume** slider scales all clips (applied to the next clip you play).
-- **Stop** button / Stop hotkey cuts the current clip.
-- **Right-click** a clip for: Play, Set/change hotkey, Clear hotkey, Rename, Remove.
-- Settings (clips, hotkeys, device, volume) are saved to `config.json` automatically.
+- **Click** a clip tile or press its **global hotkey** to play. **Space** or the Stop
+  hotkey (default `Ctrl+Alt+S`) cuts playback.
+- **Master volume** scales all clips; give one clip its own level with
+  **right-click ▸ Set volume…** (rides on top of master).
+- **Delay** + **Chime before clip** (top-right) add a pre-roll to every clip — the order
+  is **chime → delay → clip**. Handy as an incoming callout or to time a drop.
+- **Search** filters tiles (**Ctrl+F**); the grid reflows to the window width.
+- **Right-click** a tile for: Play, Set/change hotkey, Clear hotkey, Set volume, Move
+  up/down, Rename, Remove.
+- **View ▸ Dark / Light** switches the theme.
+- Settings save automatically — to `config.json` next to the app, or
+  `%APPDATA%\MicDrop\config.json` in the packaged build.
 
 ### Push-to-talk games
 
@@ -77,6 +84,28 @@ Valorant's Vanguard) can be sensitive to global hooks — for those, turn off
 **Hotkeys ▸ Enable global hotkeys** and just click the on-screen buttons, or Alt-Tab.
 If a hotkey won't fire over a fullscreen game, try running the app **as administrator**
 (right-click `run.bat` ▸ Run as administrator).
+
+---
+
+## Standalone build (no Python needed)
+
+Hand a friend a copy that runs without installing Python.
+
+**Build it** (on a machine with the project venv):
+
+```powershell
+.\.venv\Scripts\pip install -r requirements-build.txt
+.\.venv\Scripts\pyinstaller MicDrop.spec
+```
+
+This produces **`dist\MicDrop\MicDrop.exe`** — a one-folder build with the audio
+libraries (PortAudio, libsndfile) bundled. **Zip the whole `dist\MicDrop` folder** and
+send it.
+
+**For your friend:** unzip anywhere and run **`MicDrop.exe`**. Settings are saved under
+`%APPDATA%\MicDrop`. They still need **SteelSeries Sonar _or_ VoiceMeeter** installed for
+the virtual mic — see **Setup** above (also in the app under **Help ▸ Setup guide**).
+Windows SmartScreen may warn on first run of an unsigned `.exe` → **More info ▸ Run anyway**.
 
 ---
 

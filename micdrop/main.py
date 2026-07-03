@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import queue
+import sys
 import threading
 import time
 import tkinter as tk
@@ -23,7 +24,40 @@ AUDIO_FILETYPES = [
     ("All files", "*.*"),
 ]
 TILE_MIN_WIDTH = 210  # px; number of grid columns adapts to the window width
-_ASSETS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
+
+if getattr(sys, "frozen", False):
+    _ASSETS = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(__file__)), "assets")
+else:
+    _ASSETS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
+
+SETUP_GUIDE = """MicDrop plays audio clips into a virtual microphone so teammates hear them in
+your in-game voice chat — while you keep talking, and can hear the clips yourself.
+
+A program can't inject into a real mic, so clips are played INTO a device the game
+uses as its mic. You need ONE of these installed:
+
+── Option A: SteelSeries Sonar (recommended, no extra software) ──
+1. Mic output (others hear):  choose  "SteelSeries Sonar - Microphone".
+2. Also hear on (monitor):  pick your headphones, or a Sonar channel you monitor
+   (e.g. Aux / Media), or leave it on None if you don't want to hear clips.
+3. In the game, set your microphone to  "SteelSeries Sonar - Microphone".
+
+── Option B: VoiceMeeter Banana (free, vb-audio.com) ──
+1. Hardware Input 1 = your mic (enable B1).
+2. Mic output (others hear) = "VoiceMeeter Input"  (enable A1 + B1).
+3. A1 = your headphones. Point the game's mic at "VoiceMeeter Out B1".
+
+── Using it ──
+• Add clips (＋), then right-click a tile to set a hotkey, volume, rename, reorder.
+• Click a tile or press its hotkey to play.  ■ Stop  (or Space / your Stop hotkey) cuts it.
+• Delay + Chime (top-right) add a pre-roll before each clip: chime → delay → clip.
+• Master Volume scales everything; per-clip volume rides on top.
+• Search filters tiles (Ctrl+F). Dark/Light under the View menu.
+
+Push-to-talk games: hold your PTT key while a clip plays (clips only transmit while
+your mic is open). Anti-cheat: global hotkeys use a system-wide hook — for the most
+aggressive anti-cheats, turn hotkeys off (Hotkeys menu) and click the tiles instead.
+"""
 
 
 class MicDropApp:
@@ -115,7 +149,7 @@ class MicDropApp:
         menubar.add_cascade(label="Hotkeys", menu=hk)
 
         helpm = tk.Menu(menubar, tearoff=0)
-        helpm.add_command(label="Setup guide (README)", command=self._open_readme)
+        helpm.add_command(label="Setup guide", command=self._show_setup_guide)
         helpm.add_command(label="About", command=self._about)
         menubar.add_cascade(label="Help", menu=helpm)
 
@@ -764,12 +798,39 @@ class MicDropApp:
         except OSError as exc:
             self._set_status(f"Could not save config: {exc}", 6)
 
-    def _open_readme(self) -> None:
-        readme = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "README.md")
+    def _show_setup_guide(self) -> None:
+        p = self.palette
+        win = tk.Toplevel(self.root)
+        win.title("MicDrop — Setup guide")
+        win.geometry("580x560")
+        win.configure(bg=p["bg"])
+        win.transient(self.root)
         try:
-            os.startfile(readme)  # type: ignore[attr-defined]
-        except (OSError, AttributeError):
-            messagebox.showinfo("Setup guide", f"Open the README manually:\n{readme}")
+            win.iconbitmap(os.path.join(_ASSETS, "icon.ico"))
+        except tk.TclError:
+            pass
+
+        frame = ttk.Frame(win, padding=10)
+        frame.pack(fill=tk.BOTH, expand=True)
+        txt = tk.Text(
+            frame,
+            wrap="word",
+            bg=p["surface"],
+            fg=p["text"],
+            insertbackground=p["text"],
+            relief="flat",
+            padx=14,
+            pady=12,
+            font=theme.FONT_BASE,
+            highlightthickness=0,
+        )
+        sb = ttk.Scrollbar(frame, orient="vertical", command=txt.yview)
+        txt.configure(yscrollcommand=sb.set)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        txt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        txt.insert("1.0", SETUP_GUIDE)
+        txt.configure(state="disabled")
+        ttk.Button(win, text="Close", style="Accent.TButton", command=win.destroy).pack(pady=(0, 10))
 
     def _about(self) -> None:
         messagebox.showinfo(

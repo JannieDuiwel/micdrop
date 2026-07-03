@@ -1,0 +1,3 @@
+# Build-only dependencies (not needed to run MicDrop from source).
+# Install into the venv, then:  pyinstaller MicDrop.spec
+pyinstaller>=6.0
