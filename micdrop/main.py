@@ -496,11 +496,12 @@ class MicDropApp:
     def _init_device(self) -> None:
         target = self._resolve_device(self.cfg.output_device_name, self.cfg.output_device_hostapi)
         if target is None:
-            target = audio.find_voicemeeter_input(self._devices)
+            target = audio.find_virtual_mic(self._devices)
             if target is None:
                 self._device_warning = (
-                    "VoiceMeeter not found — clips play locally only. "
-                    "Install VoiceMeeter Banana (see Help ▸ Setup guide) so others hear them."
+                    "SteelSeries Sonar not found — clips play locally only. "
+                    "Install SteelSeries Sonar (or VoiceMeeter) — see Help ▸ Setup guide — "
+                    "so others hear them."
                 )
         if target is None:
             target = self._default_output_device()
@@ -529,10 +530,11 @@ class MicDropApp:
 
     def _apply_device(self, d: audio.DeviceInfo) -> None:
         """Switch the player + UI to a device. Does NOT persist (so an auto-detected
-        fallback never gets baked into config, letting VoiceMeeter win once installed)."""
+        fallback never gets baked into config, letting the virtual mic win once installed)."""
         self.player.set_device(d.index)
         self.device_var.set(d.display_name)
-        if "voicemeeter" in d.name.lower():
+        name = d.name.lower()
+        if "sonar" in name or "voicemeeter" in name:
             self._device_warning = ""
 
     def _on_device_select(self, _event: tk.Event) -> None:

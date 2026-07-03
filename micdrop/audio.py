@@ -70,6 +70,23 @@ def find_voicemeeter_input(devices: list[DeviceInfo]) -> DeviceInfo | None:
     return candidates[0]
 
 
+def find_sonar_input(devices: list[DeviceInfo]) -> DeviceInfo | None:
+    """Pick the SteelSeries Sonar virtual microphone if present.
+
+    Since `devices` is host-API ranked, the WASAPI entry is preferred.
+    """
+    for d in devices:
+        name = d.name.lower()
+        if "sonar" in name and "microphone" in name:
+            return d
+    return None
+
+
+def find_virtual_mic(devices: list[DeviceInfo]) -> DeviceInfo | None:
+    """Preferred injection target: SteelSeries Sonar first, then VoiceMeeter."""
+    return find_sonar_input(devices) or find_voicemeeter_input(devices)
+
+
 class _Voice:
     """A persistent output stream to one device, fed by a swappable buffer."""
 
