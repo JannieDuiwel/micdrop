@@ -23,40 +23,35 @@ AUDIO_FILETYPES = [
     ("Audio files", "*.wav *.flac *.ogg *.mp3 *.aiff *.aif"),
     ("All files", "*.*"),
 ]
-TILE_MIN_WIDTH = 210  # px; number of grid columns adapts to the window width
+TILE_MIN_WIDTH = 210  # px per column; the grid reflows to the window width
 
 if getattr(sys, "frozen", False):
     _ASSETS = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(__file__)), "assets")
 else:
     _ASSETS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
 
-SETUP_GUIDE = """MicDrop plays audio clips into a virtual microphone so teammates hear them in
-your in-game voice chat — while you keep talking, and can hear the clips yourself.
+SETUP_GUIDE = """A program can't inject into a real mic, so MicDrop plays clips INTO a device
+the game uses as its microphone. You need ONE of these:
 
-A program can't inject into a real mic, so clips are played INTO a device the game
-uses as its mic. You need ONE of these installed:
+── SteelSeries Sonar (no extra software) ──
+1. Mic output (others hear):  "SteelSeries Sonar - Microphone".
+2. Also hear on (monitor):  your headphones, or a Sonar channel (Aux / Media),
+   or None to not hear clips yourself.
+3. In-game, set your microphone to  "SteelSeries Sonar - Microphone".
 
-── Option A: SteelSeries Sonar (recommended, no extra software) ──
-1. Mic output (others hear):  choose  "SteelSeries Sonar - Microphone".
-2. Also hear on (monitor):  pick your headphones, or a Sonar channel you monitor
-   (e.g. Aux / Media), or leave it on None if you don't want to hear clips.
-3. In the game, set your microphone to  "SteelSeries Sonar - Microphone".
-
-── Option B: VoiceMeeter Banana (free, vb-audio.com) ──
+── VoiceMeeter Banana (free, vb-audio.com) ──
 1. Hardware Input 1 = your mic (enable B1).
 2. Mic output (others hear) = "VoiceMeeter Input"  (enable A1 + B1).
-3. A1 = your headphones. Point the game's mic at "VoiceMeeter Out B1".
+3. A1 = your headphones. In-game, set the mic to "VoiceMeeter Out B1".
 
-── Using it ──
-• Add clips (＋), then right-click a tile to set a hotkey, volume, rename, reorder.
-• Click a tile or press its hotkey to play.  ■ Stop  (or Space / your Stop hotkey) cuts it.
-• Delay + Chime (top-right) add a pre-roll before each clip: chime → delay → clip.
-• Master Volume scales everything; per-clip volume rides on top.
-• Search filters tiles (Ctrl+F). Dark/Light under the View menu.
+── Playing ──
+• Add clips (＋); right-click a tile for hotkey, volume, rename, reorder.
+• Click a tile or press its hotkey to play. Space or the Stop hotkey cuts it.
+• Delay + Chime add a pre-roll: chime → delay → clip.
+• Search filters tiles (Ctrl+F); Dark/Light is under View.
 
-Push-to-talk games: hold your PTT key while a clip plays (clips only transmit while
-your mic is open). Anti-cheat: global hotkeys use a system-wide hook — for the most
-aggressive anti-cheats, turn hotkeys off (Hotkeys menu) and click the tiles instead.
+Push-to-talk: hold your PTT key while a clip plays. Anti-cheat: hotkeys use a
+system-wide hook — disable them (Hotkeys menu) for strict anti-cheats and click tiles.
 """
 
 
@@ -202,7 +197,7 @@ class MicDropApp:
         self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 14))
         self.search_var.trace_add("write", lambda *_: self._on_search())
 
-        # Right group (packed right-to-left): [Delay (ms):] [spin]   [ ] Chime
+        # right side (packed right-to-left): delay spinbox, then chime toggle
         self.chime_var = tk.BooleanVar(value=self.cfg.chime_enabled)
         ttk.Checkbutton(
             bar, text="Chime before clip", variable=self.chime_var, command=self._on_chime_toggle

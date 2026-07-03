@@ -59,10 +59,10 @@ handling monitoring via A1 you can leave the app's monitor output on **None**.
 
 - **Click** a clip tile or press its **global hotkey** to play. **Space** or the Stop
   hotkey (default `Ctrl+Alt+S`) cuts playback.
-- **Master volume** scales all clips; give one clip its own level with
-  **right-click ▸ Set volume…** (rides on top of master).
-- **Delay** + **Chime before clip** (top-right) add a pre-roll to every clip — the order
-  is **chime → delay → clip**. Handy as an incoming callout or to time a drop.
+- **Master volume** scales all clips; set a single clip's level with
+  **right-click ▸ Set volume…**.
+- **Delay** + **Chime before clip** (top-right) add a pre-roll to every clip — order is
+  **chime → delay → clip**.
 - **Search** filters tiles (**Ctrl+F**); the grid reflows to the window width.
 - **Right-click** a tile for: Play, Set/change hotkey, Clear hotkey, Set volume, Move
   up/down, Rename, Remove.
@@ -87,25 +87,21 @@ If a hotkey won't fire over a fullscreen game, try running the app **as administ
 
 ---
 
-## Standalone build (no Python needed)
+## Standalone build
 
-Hand a friend a copy that runs without installing Python.
-
-**Build it** (on a machine with the project venv):
+Build a version that runs without a Python install:
 
 ```powershell
 .\.venv\Scripts\pip install -r requirements-build.txt
 .\.venv\Scripts\pyinstaller MicDrop.spec
 ```
 
-This produces **`dist\MicDrop\MicDrop.exe`** — a one-folder build with the audio
-libraries (PortAudio, libsndfile) bundled. **Zip the whole `dist\MicDrop` folder** and
-send it.
+This produces **`dist\MicDrop\MicDrop.exe`** — a one-folder build with the audio libraries
+(PortAudio, libsndfile) bundled. Zip `dist\MicDrop` to distribute it.
 
-**For your friend:** unzip anywhere and run **`MicDrop.exe`**. Settings are saved under
-`%APPDATA%\MicDrop`. They still need **SteelSeries Sonar _or_ VoiceMeeter** installed for
-the virtual mic — see **Setup** above (also in the app under **Help ▸ Setup guide**).
-Windows SmartScreen may warn on first run of an unsigned `.exe` → **More info ▸ Run anyway**.
+Run `MicDrop.exe` to launch; settings are stored under `%APPDATA%\MicDrop`. The machine
+still needs **SteelSeries Sonar** or **VoiceMeeter** for the virtual mic. Windows
+SmartScreen may warn on first run of an unsigned `.exe` (**More info ▸ Run anyway**).
 
 ---
 

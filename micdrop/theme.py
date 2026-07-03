@@ -1,9 +1,7 @@
 """Theming for MicDrop.
 
-Tkinter's native "vista"/"xpnative" ttk themes ignore custom colors on buttons,
-so we base everything on the "clam" theme (which honours `configure`/`map` colors)
-and drive it from a palette. `apply_theme` returns the active palette dict; the clip
-tiles are plain `tk` widgets coloured straight from it.
+Built on the "clam" ttk theme because the native Windows themes ignore custom
+button colors. `apply_theme` applies a palette to the root + ttk styles and returns it.
 """
 
 from __future__ import annotations

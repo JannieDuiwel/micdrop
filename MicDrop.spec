@@ -1,10 +1,5 @@
-# MicDrop.spec — build a standalone Windows app (one-folder).
-#
-#   pyinstaller MicDrop.spec
-#
-# Produces dist/MicDrop/MicDrop.exe  (zip the whole dist/MicDrop folder to share).
-# The native audio libraries (PortAudio via sounddevice, libsndfile via soundfile)
-# are collected explicitly so a Python-free machine has everything it needs.
+# Build a standalone one-folder app:  pyinstaller MicDrop.spec  ->  dist/MicDrop/MicDrop.exe
+# PortAudio (sounddevice) and libsndfile (soundfile) are collected explicitly.
 
 from PyInstaller.utils.hooks import collect_dynamic_libs, collect_data_files
 

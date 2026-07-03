@@ -10,9 +10,8 @@ import os
 import sys
 from dataclasses import asdict, dataclass, field, fields
 
-# Where config.json lives. In a normal (source) run it sits in the project root,
-# next to the micdrop/ package. In a frozen PyInstaller build the app directory is
-# read-only/temporary, so we persist under %APPDATA%\MicDrop instead.
+# config.json lives in the project root when run from source, or under
+# %APPDATA%\MicDrop in a frozen build (where the app directory is read-only).
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 

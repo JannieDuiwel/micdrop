@@ -1,8 +1,4 @@
-"""PyInstaller entry point: launch MicDrop as a top-level script.
-
-(PyInstaller bundles a script, not `python -m micdrop`, and a script can't use the
-package-relative import that `micdrop/__main__.py` does — so we import absolutely.)
-"""
+"""PyInstaller entry point (a top-level script, so it imports the package absolutely)."""
 
 from micdrop.main import main
 
