@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual environment (do not commit — recreate with requirements.txt)
+.venv/
+venv/
+env/
+
+# PyInstaller build artifacts
+build/
+dist/
+
+# Local config — contains personal absolute file paths and device names
+config.json
+
+# User audio clips (keep the placeholder so the folder exists)
+clips/*
+!clips/PUT-YOUR-CLIPS-HERE.txt
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/

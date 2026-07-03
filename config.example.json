@@ -1,0 +1,10 @@
+{
+  "output_device_name": "",
+  "output_device_hostapi": "",
+  "monitor_device_name": "",
+  "monitor_device_hostapi": "",
+  "master_volume": 0.8,
+  "hotkeys_enabled": true,
+  "stop_hotkey": "ctrl+alt+s",
+  "clips": []
+}
