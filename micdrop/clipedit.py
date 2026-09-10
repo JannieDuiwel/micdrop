@@ -60,6 +60,7 @@ class ClipEditor(tk.Toplevel):
         self._end = 0
         self._drag: str | None = None
         self._grabbed = "start"  # which handle the arrow keys move
+        self._capture_is_mine = False  # did WE start the capture that is in flight?
 
         self.title(f"Edit clip \u2014 {self.clip.label}")
         self.configure(bg=self.p["bg"])
@@ -297,6 +298,14 @@ class ClipEditor(tk.Toplevel):
         self.hotkey_label.configure(text=self.clip.hotkey or "none")
 
     def _set_hotkey(self) -> None:
+        # _capture_hotkey silently no-ops when a capture is already running
+        # (started from the main window, or by another editor); without this
+        # guard we would claim ownership of -- and later tear down -- a
+        # capture that was never ours to begin with.
+        if getattr(self.app, "_capturing", False):
+            self._set_hint("A hotkey capture is already running.")
+            return
+        self._capture_is_mine = True
         self.app._capture_hotkey(self.index)
         self._set_hint("Press a key combination now\u2026  (Esc cancels)")
 
@@ -329,16 +338,19 @@ class ClipEditor(tk.Toplevel):
         # The "(Esc cancels)" hint refers to the hotkey capture, not the
         # dialog; while one is in flight Escape must not tear down the
         # editor out from under it.
-        if getattr(self.app, "_capturing", False):
-            return
+        if self._capture_is_mine and getattr(self.app, "_capturing", False):
+            return  # Escape cancels OUR capture; do not tear the dialog down
         self._close()
 
     def _close(self) -> None:
         self._apply()
-        if getattr(self.app, "_capturing", False):
-            # A capture is still running. Its completion handler would restore
-            # the state it sampled while we had hotkeys suspended, undoing the
-            # line below; tell it we have already done the restoring.
+        if self._capture_is_mine and getattr(self.app, "_capturing", False):
+            # A capture WE started is still running. Its completion handler
+            # would restore the state it sampled while we had hotkeys
+            # suspended, undoing the line below; tell it we have already
+            # done the restoring. A capture we never started (e.g. one
+            # pending from the main window) is not ours to claim -- its own
+            # completion handler must still run its own restore.
             self.app._hotkeys_restore_pending = True
         self.app.hotkeys.set_enabled(self._hotkeys_were)
         self.app._editor = None
