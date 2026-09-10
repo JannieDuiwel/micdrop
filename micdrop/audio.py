@@ -22,6 +22,10 @@ import soxr
 # Host API preference order for nicer names + good latency (WASAPI first).
 _HOSTAPI_RANK = {"Windows WASAPI": 0, "Windows DirectSound": 1, "MME": 2, "Windows WDM-KS": 3}
 
+# Fade applied to a trimmed edge. A cut lands on an arbitrary non-zero sample,
+# and that step pops; 5 ms ramps it away without being audible as a fade.
+FADE_S = 0.005
+
 
 @dataclass
 class DeviceInfo:
@@ -161,6 +165,39 @@ def mix_block(
             outdata[:m] += lchunk
             np.clip(outdata, -1.0, 1.0, out=outdata)
     return buf, pos
+
+
+def trim_segment(
+    data: np.ndarray, samplerate: int, start_ms: int, end_ms: int
+) -> np.ndarray:
+    """Return the [start_ms, end_ms) slice of `data`, faded at the cut edges.
+
+    `end_ms` of 0 (or past the tail) means "to the natural end". Only an edge
+    that was actually cut is faded, so an untrimmed clip comes back
+    sample-identical — an airhorn should not ramp up over its first 5 ms.
+
+    Always returns a fresh array. A numpy slice is a view, and fading one in
+    place would write straight into the caller's cached decode.
+    """
+    n = data.shape[0]
+    if n == 0:
+        return data.copy()
+
+    i0 = int(max(0, start_ms) * samplerate / 1000)
+    i0 = min(i0, n - 1)
+    i1 = n if end_ms <= 0 else int(end_ms * samplerate / 1000)
+    i1 = min(max(i1, i0 + 1), n)
+
+    seg = np.array(data[i0:i1], dtype="float32", copy=True)
+
+    fade = min(int(samplerate * FADE_S), seg.shape[0] // 2)
+    if fade > 0:
+        ramp = np.linspace(0.0, 1.0, fade, dtype="float32")[:, None]
+        if i0 > 0:
+            seg[:fade] *= ramp
+        if i1 < n:
+            seg[-fade:] *= ramp[::-1]
+    return seg
 
 
 class _Voice:
