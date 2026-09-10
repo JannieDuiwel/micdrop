@@ -387,24 +387,50 @@ class Player:
             self._prepare(path, sr)
 
     # -- playback ---------------------------------------------------------
-    def play(self, path: str, gain: float = 1.0) -> float:
+    def play(
+        self,
+        path: str,
+        gain: float = 1.0,
+        start_ms: int = 0,
+        end_ms: int = 0,
+        monitor_only: bool = False,
+    ) -> float:
         """Play a clip to all active devices. Returns duration; raises on failure.
 
         `gain` is a per-clip multiplier applied on top of the master volume.
+        `start_ms`/`end_ms` trim the clip (`end_ms` of 0 = to the natural end).
+        `monitor_only` keeps the clip off the mic device, for previewing a trim
+        without spamming the voice party; it returns 0.0 when no monitor is set
+        rather than raising, so the caller can show a hint.
         """
-        voices = [v for v in (self._primary, self._monitor) if v is not None]
-        if not voices:
-            raise RuntimeError("No output device selected")
+        if monitor_only:
+            if self._monitor is None:
+                return 0.0
+            voices = [self._monitor]
+        else:
+            voices = [v for v in (self._primary, self._monitor) if v is not None]
+            if not voices:
+                raise RuntimeError("No output device selected")
         level = self.volume * max(0.0, gain)
         duration = 0.0
         for v in voices:
-            data = self._prepare(path, v.samplerate)
+            data = trim_segment(self._prepare(path, v.samplerate), v.samplerate, start_ms, end_ms)
             if v.channels == 1:
                 data = data.mean(axis=1, keepdims=True).astype("float32")
             out = np.ascontiguousarray(data * level, dtype="float32")
             v.play(out)
             duration = max(duration, out.shape[0] / v.samplerate)
         return duration
+
+    def peaks(self, path: str, columns: int = 2000) -> tuple[np.ndarray, float]:
+        """Peak envelope + duration in seconds, for drawing a waveform.
+
+        Reuses the same decode cache playback uses, so opening the editor on a
+        clip that has already played costs nothing.
+        """
+        sr = self._primary.samplerate if self._primary is not None else 48000
+        data = self._prepare(path, sr)
+        return compute_peaks(data, columns), data.shape[0] / sr
 
     def _make_chime(self, samplerate: int) -> np.ndarray:
         """A short two-tone 'di-ding' as contiguous float32 stereo, click-free."""

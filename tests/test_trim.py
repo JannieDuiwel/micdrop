@@ -155,3 +155,79 @@ class TestRebucketPeaks:
 
     def test_zero_width_returns_empty(self):
         assert rebucket_peaks(np.ones(10, dtype="float32"), 0) == []
+
+
+from micdrop.audio import Player
+
+
+class _FakeVoice:
+    """Stands in for _Voice: same three attributes Player.play touches."""
+
+    def __init__(self, samplerate=48000, channels=2):
+        self.samplerate = samplerate
+        self.channels = channels
+        self.played = None
+
+    def play(self, data):
+        self.played = data
+
+
+def _player(monkeypatch, cached, primary=True, monitor=False):
+    p = Player()
+    if primary:
+        p._primary = _FakeVoice()
+    if monitor:
+        p._monitor = _FakeVoice()
+    monkeypatch.setattr(p, "_prepare", lambda path, sr: cached)
+    return p
+
+
+class TestPlayerTrim:
+    def test_play_does_not_mutate_the_cached_decode(self, monkeypatch):
+        cached = np.ones((48000, 2), dtype="float32")
+        before = cached.copy()
+        p = _player(monkeypatch, cached)
+        p.play("clip.wav", start_ms=100, end_ms=900)
+        assert np.array_equal(cached, before), "the fade leaked into the cache"
+
+    def test_play_sends_only_the_trimmed_range(self, monkeypatch):
+        cached = np.ones((48000, 2), dtype="float32")  # 1.0 s at 48 kHz
+        p = _player(monkeypatch, cached)
+        p.play("clip.wav", start_ms=250, end_ms=750)
+        assert p._primary.played.shape[0] == 24000  # 0.5 s
+
+    def test_untrimmed_play_sends_the_whole_clip(self, monkeypatch):
+        cached = np.ones((48000, 2), dtype="float32")
+        p = _player(monkeypatch, cached)
+        p.play("clip.wav")
+        assert p._primary.played.shape[0] == 48000
+
+    def test_monitor_only_leaves_the_mic_voice_silent(self, monkeypatch):
+        cached = np.ones((4800, 2), dtype="float32")
+        p = _player(monkeypatch, cached, primary=True, monitor=True)
+        p.play("clip.wav", monitor_only=True)
+        assert p._primary.played is None
+        assert p._monitor.played is not None
+
+    def test_monitor_only_without_a_monitor_returns_zero(self, monkeypatch):
+        cached = np.ones((4800, 2), dtype="float32")
+        p = _player(monkeypatch, cached, primary=True, monitor=False)
+        assert p.play("clip.wav", monitor_only=True) == 0.0
+        assert p._primary.played is None
+
+    def test_normal_play_without_any_device_still_raises(self, monkeypatch):
+        cached = np.ones((4800, 2), dtype="float32")
+        p = _player(monkeypatch, cached, primary=False)
+        try:
+            p.play("clip.wav")
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("expected RuntimeError when no device is selected")
+
+    def test_peaks_returns_envelope_and_duration(self, monkeypatch):
+        cached = np.ones((48000, 2), dtype="float32")
+        p = _player(monkeypatch, cached)
+        peaks, duration = p.peaks("clip.wav", 100)
+        assert peaks.shape == (100,)
+        assert abs(duration - 1.0) < 1e-6
