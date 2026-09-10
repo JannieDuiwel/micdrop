@@ -75,7 +75,7 @@ class ClipEditor(tk.Toplevel):
         self._load_audio()
 
         self.protocol("WM_DELETE_WINDOW", self._close)
-        self.bind("<Escape>", lambda _e: self._close())
+        self.bind("<Escape>", self._on_escape)
         self.bind("<Left>", lambda e: self._on_arrow(e, -1))
         self.bind("<Right>", lambda e: self._on_arrow(e, +1))
         self.grab_set()
@@ -164,6 +164,8 @@ class ClipEditor(tk.Toplevel):
         end = self.clip.end_ms
         self._end = self._duration_ms if end <= 0 or end > self._duration_ms else end
         self._end = max(self._end, self._start + MIN_RANGE_MS)
+        self._end = min(self._end, self._duration_ms)  # a clip under MIN_RANGE_MS must not push the handle off-canvas
+        self._apply()  # sync the clip before the first paint, so Preview matches what is drawn
         self._redraw()
         self._update_times()
 
@@ -234,6 +236,8 @@ class ClipEditor(tk.Toplevel):
         An end at the tail is stored as 0 ('natural end') so the trim survives
         the file being replaced with a longer or shorter one.
         """
+        if self._peaks is None:
+            return  # audio never loaded; the clip's stored trim must survive untouched
         self.clip.start_ms = int(self._start) if self._start > 0 else 0
         self.clip.end_ms = 0 if self._end >= self._duration_ms else int(self._end)
 
@@ -257,8 +261,9 @@ class ClipEditor(tk.Toplevel):
         self._drag = None
 
     def _on_arrow(self, event: tk.Event, direction: int) -> str | None:
-        # Arrow keys must still move the caret when the label field has focus.
-        if isinstance(self.focus_get(), (tk.Entry, ttk.Entry)):
+        # Arrow keys must still move the caret when the label field has focus,
+        # and TScale's own class bindings must not also nudge a trim handle.
+        if isinstance(self.focus_get(), (tk.Entry, ttk.Entry, ttk.Scale)):
             return None
         if self._peaks is None:
             return None
@@ -320,8 +325,21 @@ class ClipEditor(tk.Toplevel):
             self._set_hint("")
 
     # -- teardown ---------------------------------------------------------
+    def _on_escape(self, _event: tk.Event) -> None:
+        # The "(Esc cancels)" hint refers to the hotkey capture, not the
+        # dialog; while one is in flight Escape must not tear down the
+        # editor out from under it.
+        if getattr(self.app, "_capturing", False):
+            return
+        self._close()
+
     def _close(self) -> None:
         self._apply()
+        if getattr(self.app, "_capturing", False):
+            # A capture is still running. Its completion handler would restore
+            # the state it sampled while we had hotkeys suspended, undoing the
+            # line below; tell it we have already done the restoring.
+            self.app._hotkeys_restore_pending = True
         self.app.hotkeys.set_enabled(self._hotkeys_were)
         self.app._editor = None
         self.app._save()

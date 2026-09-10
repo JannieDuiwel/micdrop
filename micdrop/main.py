@@ -86,6 +86,7 @@ class MicDropApp:
         self._msg_until = 0.0
         self._menu_index = 0
         self._editor: clipedit.ClipEditor | None = None
+        self._hotkeys_restore_pending = False
         self._search = ""
         self._columns = 3
         self._tiles: dict[int, tk.Frame] = {}
@@ -925,7 +926,10 @@ class MicDropApp:
         self._capturing = False
         if self._editor is not None:
             self._editor.refresh_hotkey()
-        self.hotkeys.set_enabled(prev)
+        if self._hotkeys_restore_pending:
+            self._hotkeys_restore_pending = False  # the editor already restored
+        else:
+            self.hotkeys.set_enabled(prev)
         if hk and hk.lower() != "esc":
             if target == "stop":
                 self.cfg.stop_hotkey = hk
