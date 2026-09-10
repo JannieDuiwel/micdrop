@@ -17,7 +17,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import sounddevice as sd
 
-from . import audio, config, hotkeys, routing, theme
+from . import audio, clipedit, config, hotkeys, routing, theme
 
 AUDIO_FILETYPES = [
     ("Audio files", "*.wav *.flac *.ogg *.mp3 *.aiff *.aif"),
@@ -85,6 +85,7 @@ class MicDropApp:
         self._msg = ""
         self._msg_until = 0.0
         self._menu_index = 0
+        self._editor: clipedit.ClipEditor | None = None
         self._search = ""
         self._columns = 3
         self._tiles: dict[int, tk.Frame] = {}
@@ -250,6 +251,7 @@ class MicDropApp:
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
         self.clip_menu = tk.Menu(self.root, tearoff=0)
+        self.clip_menu.add_command(label="Edit clip…", command=self._menu_edit)
         self.clip_menu.add_command(label="Play", command=self._menu_play)
         self.clip_menu.add_command(label="Set / change hotkey…", command=self._menu_set_hotkey)
         self.clip_menu.add_command(label="Clear hotkey", command=self._menu_clear_hotkey)
@@ -574,9 +576,23 @@ class MicDropApp:
             self.clip_menu.grab_release()
 
     def _on_mousewheel(self, event: tk.Event) -> None:
+        # bind_all reaches every window in the app, dialogs included; only the
+        # main window's wheel should scroll the clip grid.
+        if event.widget.winfo_toplevel() is not self.root:
+            return
         self.canvas.yview_scroll(int(-event.delta / 120), "units")
 
     # -- context menu actions --------------------------------------------
+    def _menu_edit(self) -> None:
+        self._open_editor(self._menu_index)
+
+    def _open_editor(self, index: int) -> None:
+        """Open the Edit clip screen, or raise the one already open."""
+        if self._editor is not None:
+            self._editor.lift()
+            return
+        self._editor = clipedit.ClipEditor(self, index)
+
     def _menu_play(self) -> None:
         self.trigger_play(self.cfg.clips[self._menu_index])
 
@@ -907,6 +923,8 @@ class MicDropApp:
 
     def _on_hotkey_assigned(self, target, hk: str, prev: bool) -> None:
         self._capturing = False
+        if self._editor is not None:
+            self._editor.refresh_hotkey()
         self.hotkeys.set_enabled(prev)
         if hk and hk.lower() != "esc":
             if target == "stop":
@@ -920,6 +938,8 @@ class MicDropApp:
             self._build_clip_buttons()
             self._apply_hotkeys()
             self._set_status(f"Hotkey set: {hk}", 3)
+            if self._editor is not None:
+                self._editor.refresh_hotkey()
         else:
             self._set_status("Hotkey assignment cancelled", 2)
 
