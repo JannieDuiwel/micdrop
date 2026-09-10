@@ -36,6 +36,8 @@ class Clip:
     label: str
     hotkey: str = ""  # e.g. "ctrl+alt+1"; empty = no hotkey
     volume: float = 1.0  # per-clip gain (0.0–1.0), multiplied with master volume
+    start_ms: int = 0  # play from here; 0 = from the beginning
+    end_ms: int = 0  # play until here; 0 = to the natural end
 
     @classmethod
     def from_dict(cls, d: dict) -> "Clip":
