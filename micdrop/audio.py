@@ -87,6 +87,82 @@ def find_virtual_mic(devices: list[DeviceInfo]) -> DeviceInfo | None:
     return find_sonar_input(devices) or find_voicemeeter_input(devices)
 
 
+class RingBuffer:
+    """Fixed-capacity float32 frame buffer; one writer thread, one reader thread.
+
+    `write` drops the oldest frames on overflow; `read` returns fewer frames
+    than asked on underrun (possibly zero rows).
+    """
+
+    def __init__(self, capacity_frames: int, channels: int) -> None:
+        self._buf = np.zeros((capacity_frames, channels), dtype="float32")
+        self._cap = capacity_frames
+        self.channels = channels
+        self._r = 0  # absolute frames read
+        self._w = 0  # absolute frames written
+        self._lock = threading.Lock()
+
+    def write(self, data: np.ndarray) -> None:
+        with self._lock:
+            n = data.shape[0]
+            if n >= self._cap:
+                data = data[-self._cap :]
+                n = data.shape[0]
+            start = self._w % self._cap
+            first = min(n, self._cap - start)
+            self._buf[start : start + first] = data[:first]
+            if n > first:
+                self._buf[: n - first] = data[first:]
+            self._w += n
+            if self._w - self._r > self._cap:
+                self._r = self._w - self._cap
+
+    def read(self, frames: int) -> np.ndarray:
+        with self._lock:
+            n = min(frames, self._w - self._r)
+            out = np.empty((n, self.channels), dtype="float32")
+            start = self._r % self._cap
+            first = min(n, self._cap - start)
+            out[:first] = self._buf[start : start + first]
+            if n > first:
+                out[first:] = self._buf[: n - first]
+            self._r += n
+            return out
+
+
+def mix_block(
+    outdata: np.ndarray,
+    buf: np.ndarray | None,
+    pos: int,
+    live: RingBuffer | None,
+) -> tuple[np.ndarray | None, int]:
+    """Fill one output block from the clip buffer plus the live feed.
+
+    Returns the advanced (buf, pos); buf becomes None when the clip ends.
+    Whenever live audio is mixed in, the result is hard-clipped to ±1.
+    """
+    frames = outdata.shape[0]
+    if buf is None:
+        outdata.fill(0)
+    else:
+        chunk = buf[pos : pos + frames]
+        n = chunk.shape[0]
+        if n:
+            outdata[:n] = chunk
+        if n < frames:
+            outdata[n:] = 0
+            buf, pos = None, 0
+        else:
+            pos += frames
+    if live is not None:
+        lchunk = live.read(frames)
+        m = lchunk.shape[0]
+        if m:
+            outdata[:m] += lchunk
+            np.clip(outdata, -1.0, 1.0, out=outdata)
+    return buf, pos
+
+
 class _Voice:
     """A persistent output stream to one device, fed by a swappable buffer."""
 
@@ -96,6 +172,7 @@ class _Voice:
         self.channels = channels
         self._buf: np.ndarray | None = None
         self._pos = 0
+        self.live: RingBuffer | None = None  # routed live audio, mixed over clips
         self._lock = threading.Lock()
         self.stream = sd.OutputStream(
             device=device_index,
@@ -108,20 +185,7 @@ class _Voice:
 
     def _callback(self, outdata, frames, time_info, status) -> None:  # noqa: ANN001
         with self._lock:
-            buf = self._buf
-            if buf is None:
-                outdata.fill(0)
-                return
-            chunk = buf[self._pos : self._pos + frames]
-            n = chunk.shape[0]
-            if n:
-                outdata[:n] = chunk
-            if n < frames:
-                outdata[n:] = 0
-                self._buf = None
-                self._pos = 0
-            else:
-                self._pos += frames
+            self._buf, self._pos = mix_block(outdata, self._buf, self._pos, self.live)
 
     def play(self, data: np.ndarray) -> None:
         with self._lock:
@@ -191,6 +255,29 @@ class Player:
 
     def set_volume(self, volume: float) -> None:
         self.volume = max(0.0, min(1.0, float(volume)))
+
+    # -- live routing -------------------------------------------------------
+    def enable_live(self) -> tuple[int, int]:
+        """Attach a live ring buffer (~1 s) to the mic voice for routed audio.
+
+        Returns (samplerate, channels) the feed must match.
+        """
+        with self._lock:
+            v = self._primary
+            if v is None:
+                raise RuntimeError("No output device selected")
+            v.live = RingBuffer(v.samplerate, v.channels)
+            return v.samplerate, v.channels
+
+    def feed_live(self, data: np.ndarray) -> None:
+        v = self._primary
+        if v is not None and v.live is not None:
+            v.live.write(data)
+
+    def disable_live(self) -> None:
+        with self._lock:
+            if self._primary is not None:
+                self._primary.live = None
 
     # -- loading ----------------------------------------------------------
     def _prepare(self, path: str, samplerate: int) -> np.ndarray:

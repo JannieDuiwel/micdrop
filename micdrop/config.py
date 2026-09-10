@@ -56,6 +56,8 @@ class Config:
     theme: str = "dark"  # "dark" | "light"
     play_delay_ms: int = 0  # global delay before a clip plays (after the chime)
     chime_enabled: bool = False  # play a short chime before each clip
+    route_source_name: str = ""  # playback device routed live into the mic ("" = none picked)
+    route_volume: float = 0.8  # gain for routed audio, independent of clip volume
     clips: list[Clip] = field(default_factory=list)
 
     # -- serialisation ----------------------------------------------------
@@ -80,6 +82,8 @@ class Config:
             theme=theme,
             play_delay_ms=int(d.get("play_delay_ms", 0)),
             chime_enabled=bool(d.get("chime_enabled", False)),
+            route_source_name=d.get("route_source_name", ""),
+            route_volume=float(d.get("route_volume", 0.8)),
             clips=clips,
         )
 

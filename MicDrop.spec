@@ -5,14 +5,18 @@
 from PyInstaller.utils.hooks import collect_dynamic_libs, collect_data_files
 
 binaries = collect_dynamic_libs("sounddevice") + collect_dynamic_libs("soundfile")
-datas = collect_data_files("soundfile") + [("assets/icon.ico", "assets")]
+datas = (
+    collect_data_files("soundfile")
+    + collect_data_files("soundcard")
+    + [("assets/icon.ico", "assets")]
+)
 
 a = Analysis(
     ["run_micdrop.py"],
     pathex=[],
     binaries=binaries,
     datas=datas,
-    hiddenimports=["sounddevice", "soundfile", "soxr", "numpy", "keyboard"],
+    hiddenimports=["sounddevice", "soundfile", "soxr", "numpy", "keyboard", "soundcard"],
     hookspath=[],
     runtime_hooks=[],
     excludes=["tkinter.test", "test", "unittest", "pydoc"],

@@ -186,4 +186,17 @@ def apply_theme(root: tk.Tk, mode: str) -> dict:
     )
     style.map("Vertical.TScrollbar", background=[("active", p["surface_hover"])])
 
+    style.configure("TNotebook", background=p["bg"], borderwidth=0)
+    style.configure(
+        "TNotebook.Tab",
+        background=p["surface"],
+        foreground=p["muted"],
+        padding=(14, 6),
+    )
+    style.map(
+        "TNotebook.Tab",
+        background=[("selected", p["bg"])],
+        foreground=[("selected", p["text"])],
+    )
+
     return p

@@ -1,0 +1,12 @@
+# Normalise every text file to LF in the repository. Windows editors here
+# already write LF; without this, the CRLF blobs inherited from earlier
+# commits make every file look modified.
+* text=auto eol=lf
+
+# Binary assets: never touch.
+*.png binary
+*.ico binary
+*.wav binary
+*.mp3 binary
+*.ogg binary
+*.flac binary

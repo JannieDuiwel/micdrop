@@ -17,7 +17,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import sounddevice as sd
 
-from . import audio, config, hotkeys, theme
+from . import audio, config, hotkeys, routing, theme
 
 AUDIO_FILETYPES = [
     ("Audio files", "*.wav *.flac *.ogg *.mp3 *.aiff *.aif"),
@@ -50,6 +50,10 @@ the game uses as its microphone. You need ONE of these:
 • Delay + Chime add a pre-roll: chime → delay → clip.
 • Search filters tiles (Ctrl+F); Dark/Light is under View.
 
+── Route music ──
+• Route tab: pick the device your music plays on, click ▶ Route to mic.
+• Your party hears it mixed with your voice; clips still work on top.
+
 Push-to-talk: hold your PTT key while a clip plays. Anti-cheat: hotkeys use a
 system-wide hook — disable them (Hotkeys menu) for strict anti-cheats and click tiles.
 """
@@ -68,6 +72,10 @@ class MicDropApp:
         self.hotkeys = hotkeys.HotkeyManager()
 
         self._cmd_q: queue.Queue = queue.Queue()
+        self.router = routing.Router(
+            self.player.feed_live,
+            lambda msg: self._cmd_q.put(("route_error", msg)),
+        )
         self._last_played = ""
         self._playing_index: int | None = None
         self._play_token = 0
@@ -87,14 +95,18 @@ class MicDropApp:
 
         self._build_menu()
         self._build_top_bar()
+        self._build_notebook()
         self._build_options_bar()
         self._build_clip_area()
+        self._build_route_tab()
         self._build_status_bar()
         self._bind_shortcuts()
 
         self._load_devices()
         self._init_device()
         self._init_monitor()
+        self._load_route_sources()
+        self._update_route_hint()
         if not self.cfg.hotkeys_enabled:
             self.hotkeys.set_enabled(False)
         self._apply_hotkeys()
@@ -187,8 +199,16 @@ class MicDropApp:
 
         bar.columnconfigure(1, weight=1)
 
+    def _build_notebook(self) -> None:
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=8, pady=(4, 0))
+        self.board_tab = ttk.Frame(self.notebook)
+        self.route_tab = ttk.Frame(self.notebook, padding=12)
+        self.notebook.add(self.board_tab, text="  Soundboard  ")
+        self.notebook.add(self.route_tab, text="  Route  ")
+
     def _build_options_bar(self) -> None:
-        bar = ttk.Frame(self.root, padding=(8, 0, 8, 6))
+        bar = ttk.Frame(self.board_tab, padding=(0, 6, 0, 6))
         bar.pack(side=tk.TOP, fill=tk.X)
 
         ttk.Label(bar, text="🔎 Search:").pack(side=tk.LEFT)
@@ -212,8 +232,8 @@ class MicDropApp:
         ttk.Label(bar, text="Delay (ms):").pack(side=tk.RIGHT)
 
     def _build_clip_area(self) -> None:
-        container = ttk.Frame(self.root)
-        container.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=8)
+        container = ttk.Frame(self.board_tab)
+        container.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
         self.canvas = tk.Canvas(container, highlightthickness=0, bg=self.palette["bg"])
         vbar = ttk.Scrollbar(container, orient="vertical", command=self.canvas.yview)
@@ -242,6 +262,152 @@ class MicDropApp:
         self.clip_menu.add_command(label="Remove", command=self._menu_remove)
 
         self._build_clip_buttons()
+
+    # ===================================================================
+    # Route tab (live loopback → mic)
+    # ===================================================================
+    ROUTE_PLACEHOLDER = "— no playback devices found —"
+
+    def _build_route_tab(self) -> None:
+        f = self.route_tab
+        ttk.Label(
+            f,
+            text="Play music from another app (Spotify, browser…) to a device below,\n"
+            "then route that device into your mic so your party hears it.",
+            style="Muted.TLabel",
+            justify="left",
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
+
+        ttk.Label(f, text="Route what's playing on:").grid(row=1, column=0, sticky="w")
+        self.route_source_var = tk.StringVar()
+        self.route_combo = ttk.Combobox(
+            f, textvariable=self.route_source_var, state="readonly", width=52
+        )
+        self.route_combo.grid(row=1, column=1, sticky="we", padx=(6, 0))
+        self.route_combo.bind("<<ComboboxSelected>>", self._on_route_source_select)
+
+        ttk.Label(f, text="Music volume:").grid(row=2, column=0, sticky="w", pady=(10, 0))
+        self.route_vol_scale = ttk.Scale(
+            f, from_=0, to=100, orient="horizontal", command=self._on_route_volume
+        )
+        self.route_vol_scale.set(self.cfg.route_volume * 100)
+        self.route_vol_scale.grid(row=2, column=1, sticky="we", padx=(6, 0), pady=(10, 0))
+        self.route_vol_scale.bind("<ButtonRelease-1>", lambda e: self._save())
+
+        self.route_btn = ttk.Button(
+            f, text="▶  Route to mic", style="Accent.TButton", command=self._toggle_route
+        )
+        self.route_btn.grid(row=3, column=0, columnspan=2, sticky="we", pady=(14, 0))
+
+        ttk.Label(f, text="Level:").grid(row=4, column=0, sticky="w", pady=(10, 0))
+        self.route_meter = tk.Canvas(
+            f, height=12, bg=self.palette["trough"], highlightthickness=0
+        )
+        self.route_meter.grid(row=4, column=1, sticky="we", padx=(6, 0), pady=(10, 0))
+
+        self.route_status_var = tk.StringVar(value="Not routing.")
+        ttk.Label(f, textvariable=self.route_status_var, style="Muted.TLabel").grid(
+            row=5, column=0, columnspan=2, sticky="w", pady=(10, 0)
+        )
+        f.columnconfigure(1, weight=1)
+
+        self._load_route_sources()
+
+    def _load_route_sources(self) -> None:
+        """Fill the source dropdown, excluding the current mic output (feedback loop)."""
+        try:
+            names = routing.list_route_sources()
+        except Exception as exc:  # noqa: BLE001 - soundcard missing/broken
+            names = []
+            self._set_status(f"Can't list routable devices: {exc}", 6)
+        # Exclude the *applied* mic device (auto-detected ones never reach cfg).
+        mic = ""
+        for d in self._devices:
+            if d.index == self.player.device_index:
+                mic = d.name.strip().lower()
+                break
+        if mic:
+            names = [
+                n
+                for n in names
+                if not (n.strip().lower().startswith(mic) or mic.startswith(n.strip().lower()))
+            ]
+        self._route_sources = names
+        if names:
+            self.route_combo["values"] = names
+            self.route_btn.state(["!disabled"])
+            saved = self.cfg.route_source_name
+            self.route_source_var.set(saved if saved in names else names[0])
+        else:
+            self.route_combo["values"] = [self.ROUTE_PLACEHOLDER]
+            self.route_source_var.set(self.ROUTE_PLACEHOLDER)
+            self.route_btn.state(["disabled"])
+
+    def _on_route_source_select(self, _event: tk.Event) -> None:
+        name = self.route_source_var.get()
+        if name == self.ROUTE_PLACEHOLDER:
+            return
+        self.cfg.route_source_name = name
+        self._save()
+        if self.router.running:
+            self._stop_route()
+            self._start_route()
+        self._update_route_hint()
+
+    def _update_route_hint(self) -> None:
+        src = self.route_source_var.get().strip().lower()
+        mon = self.cfg.monitor_device_name.strip().lower()
+        if mon and src and (src.startswith(mon) or mon.startswith(src)):
+            self.route_status_var.set(
+                "Note: this is also your monitor device — friends will hear clips twice (slight echo)."
+            )
+        elif not self.router.running:
+            self.route_status_var.set("Not routing.")
+
+    def _start_route(self) -> None:
+        name = self.route_source_var.get()
+        if not name or name == self.ROUTE_PLACEHOLDER:
+            self._set_status("Pick a device to route first", 4)
+            return
+        try:
+            sr, ch = self.player.enable_live()
+        except RuntimeError:
+            self._set_status("Select a Mic output device first", 4)
+            return
+        self.router.set_gain(self.cfg.route_volume)
+        self.router.start(name, sr, ch)
+        self.cfg.route_source_name = name
+        self._save()
+        self.route_btn.configure(text="■  Stop routing", style="Danger.TButton")
+        mic = self.cfg.output_device_name or "mic output"
+        self.route_status_var.set(f"Routing: {name}  →  {mic}")
+
+    def _stop_route(self) -> None:
+        self.router.stop()
+        self.player.disable_live()
+        self.route_btn.configure(text="▶  Route to mic", style="Accent.TButton")
+        self.route_status_var.set("Not routing.")
+        self._draw_route_meter(0.0)
+
+    def _toggle_route(self) -> None:
+        if self.router.running:
+            self._stop_route()
+        else:
+            self._start_route()
+
+    def _on_route_volume(self, value: str) -> None:
+        v = float(value) / 100.0
+        self.cfg.route_volume = v
+        self.router.set_gain(v)
+
+    def _draw_route_meter(self, level: float) -> None:
+        c = self.route_meter
+        c.delete("all")
+        w = c.winfo_width()
+        if w > 1 and level > 0:
+            c.create_rectangle(
+                0, 0, int(w * min(1.0, level)), 12, fill=self.palette["accent"], width=0
+            )
 
     def _build_status_bar(self) -> None:
         self.status_var = tk.StringVar(value="Ready")
@@ -544,11 +710,20 @@ class MicDropApp:
         idx = self.device_combo.current()
         if 0 <= idx < len(self._devices):
             d = self._devices[idx]
+            was_routing = self.router.running
+            if was_routing:
+                self._stop_route()
             self._apply_device(d)
             self.cfg.output_device_name = d.name
             self.cfg.output_device_hostapi = d.hostapi
             self._save()
             self._warm_cache()
+            self._load_route_sources()
+            if was_routing:
+                if self.route_source_var.get() != self.ROUTE_PLACEHOLDER:
+                    self._start_route()
+                else:
+                    self._set_status("Routing stopped: source list changed", 4)
 
     def _on_monitor_select(self, _event: tk.Event) -> None:
         idx = self.monitor_combo.current()  # 0 = None, then device i-1
@@ -567,6 +742,7 @@ class MicDropApp:
             self.cfg.monitor_device_hostapi = d.hostapi
         self._save()
         self._warm_cache()
+        self._update_route_hint()
 
     # ===================================================================
     # Volume / delay / chime / theme / search
@@ -600,6 +776,7 @@ class MicDropApp:
         self.palette = theme.apply_theme(self.root, mode)
         self.canvas.configure(bg=self.palette["bg"])
         self._build_clip_buttons()
+        self.route_meter.configure(bg=self.palette["trough"])
         self._save()
 
     def _on_search(self) -> None:
@@ -766,6 +943,9 @@ class MicDropApp:
             self._set_status(cmd[1], 6)
         elif kind == "assigned":
             self._on_hotkey_assigned(cmd[1], cmd[2], cmd[3])
+        elif kind == "route_error":
+            self._stop_route()
+            self._set_status(cmd[1], 6)
         elif kind == "status":
             self._set_status(cmd[1])
 
@@ -777,6 +957,7 @@ class MicDropApp:
             pass
 
         self._refresh_highlight()
+        self._draw_route_meter(self.router.peak if self.router.running else 0.0)
 
         now = time.monotonic()
         if self._capturing:
@@ -845,6 +1026,7 @@ class MicDropApp:
 
     def _on_close(self) -> None:
         try:
+            self.router.stop()
             self._save()
         finally:
             self.hotkeys.clear()

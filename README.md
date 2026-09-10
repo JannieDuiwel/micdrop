@@ -70,6 +70,22 @@ handling monitoring via A1 you can leave the app's monitor output on **None**.
 - Settings save automatically — to `config.json` next to the app, or
   `%APPDATA%\MicDrop\config.json` in the packaged build.
 
+### Route music into your mic
+
+The **Route** tab captures whatever is playing on a chosen playback device and
+mixes it into the **Mic output**, live — so your voice party hears your music.
+
+1. Play music from any app (Spotify, a browser…) to some playback device —
+   e.g. `SteelSeries Sonar - Media` or your headphones.
+2. In the **Route** tab, pick that device under **Route what's playing on**.
+3. Click **▶ Route to mic**. The level meter shows audio flowing; **Music
+   volume** sets how loud it is for others (independent of clip volume).
+
+Clips still work while routing — both are mixed into your mic. The current Mic
+output device is hidden from the source list (routing it into itself would
+feed back). Push-to-talk caveat applies here too: music only transmits while
+your mic is open.
+
 ### Push-to-talk games
 
 Clips only transmit while your mic is actually open. If the game uses **push-to-talk**,
