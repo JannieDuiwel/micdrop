@@ -1,6 +1,7 @@
 import numpy as np
 
-from micdrop.audio import trim_segment, compute_peaks, rebucket_peaks
+from micdrop.audio import Player, trim_segment, compute_peaks, rebucket_peaks
+from micdrop.clipedit import format_ms, trim_badge
 
 
 def _ramp(n, channels=2):
@@ -157,9 +158,6 @@ class TestRebucketPeaks:
         assert rebucket_peaks(np.ones(10, dtype="float32"), 0) == []
 
 
-from micdrop.audio import Player
-
-
 class _FakeVoice:
     """Stands in for _Voice: same three attributes Player.play touches."""
 
@@ -232,8 +230,6 @@ class TestPlayerTrim:
         assert peaks.shape == (100,)
         assert abs(duration - 1.0) < 1e-6
 
-from micdrop.clipedit import format_ms, trim_badge
-
 
 class TestFormatMs:
     def test_sub_second(self):
@@ -263,10 +259,10 @@ class TestTrimBadge:
         assert trim_badge(0, 0) == ""
 
     def test_both_ends_trimmed(self):
-        assert trim_badge(400, 2900) == "✂ 0:00.4–0:02.9"
+        assert trim_badge(400, 2900) == "\u2702 0:00.4\u20130:02.9"
 
     def test_only_the_start_trimmed(self):
-        assert trim_badge(400, 0) == "✂ from 0:00.4"
+        assert trim_badge(400, 0) == "\u2702 from 0:00.4"
 
     def test_only_the_end_trimmed(self):
-        assert trim_badge(0, 2900) == "✂ to 0:02.9"
+        assert trim_badge(0, 2900) == "\u2702 to 0:02.9"
