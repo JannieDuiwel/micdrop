@@ -231,3 +231,42 @@ class TestPlayerTrim:
         peaks, duration = p.peaks("clip.wav", 100)
         assert peaks.shape == (100,)
         assert abs(duration - 1.0) < 1e-6
+
+from micdrop.clipedit import format_ms, trim_badge
+
+
+class TestFormatMs:
+    def test_sub_second(self):
+        assert format_ms(400) == "0:00.4"
+
+    def test_seconds_and_tenths(self):
+        assert format_ms(2900) == "0:02.9"
+
+    def test_pads_seconds_to_two_digits(self):
+        assert format_ms(5000) == "0:05.0"
+
+    def test_crosses_a_minute(self):
+        assert format_ms(65_000) == "1:05.0"
+
+    def test_zero(self):
+        assert format_ms(0) == "0:00.0"
+
+    def test_negative_clamps_to_zero(self):
+        assert format_ms(-500) == "0:00.0"
+
+    def test_truncates_rather_than_rounds_up_a_tenth(self):
+        assert format_ms(2999) == "0:02.9"
+
+
+class TestTrimBadge:
+    def test_untrimmed_gives_no_badge(self):
+        assert trim_badge(0, 0) == ""
+
+    def test_both_ends_trimmed(self):
+        assert trim_badge(400, 2900) == "✂ 0:00.4–0:02.9"
+
+    def test_only_the_start_trimmed(self):
+        assert trim_badge(400, 0) == "✂ from 0:00.4"
+
+    def test_only_the_end_trimmed(self):
+        assert trim_badge(0, 2900) == "✂ to 0:02.9"
