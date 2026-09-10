@@ -520,6 +520,9 @@ class MicDropApp:
             badges.append(f"⌨ {clip.hotkey}")
         if abs(getattr(clip, "volume", 1.0) - 1.0) > 1e-3:
             badges.append(f"🔊 {int(round(clip.volume * 100))}%")
+        trim = clipedit.trim_badge(getattr(clip, "start_ms", 0), getattr(clip, "end_ms", 0))
+        if trim:
+            badges.append(trim)
         if badges:
             name.pack(fill="x", padx=10, pady=(12, 2))
             badge = tk.Label(
@@ -849,6 +852,8 @@ class MicDropApp:
         chime = self.cfg.chime_enabled
         delay = max(0, self.cfg.play_delay_ms) / 1000.0
         gain = float(getattr(clip, "volume", 1.0))
+        start_ms = int(getattr(clip, "start_ms", 0))
+        end_ms = int(getattr(clip, "end_ms", 0))
 
         def work() -> None:
             try:
@@ -860,7 +865,7 @@ class MicDropApp:
                     time.sleep(delay)
                 if token != self._play_token:  # superseded or stopped during pre-roll
                     return
-                self.player.play(clip.path, gain=gain)
+                self.player.play(clip.path, gain=gain, start_ms=start_ms, end_ms=end_ms)
             except Exception as exc:  # noqa: BLE001 - surface any decode/device error
                 self._cmd_q.put(("error", f"Couldn't play '{clip.label}': {exc}"))
 
