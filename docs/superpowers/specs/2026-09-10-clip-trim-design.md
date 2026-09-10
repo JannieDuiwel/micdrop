@@ -109,6 +109,13 @@ that `_Voice` calls, and the seam `test_audio_mix.py` already tests through:
   never empty or negative-length. The 50 ms minimum range is a *UI* constraint —
   the engine only guarantees it never produces a bad slice, because a
   hand-edited `config.json` can hold anything.
+
+  **Only edges that were actually cut are faded** — fade in only when
+  `i0 > 0`, fade out only when `i1 < len(data)`. A pop can only happen at a cut;
+  fading an untrimmed clip would soften the attack on every clip already on the
+  board (an airhorn is exactly the wrong thing to ramp up over 5 ms) and would
+  silently change playback that works today. An untrimmed clip therefore comes
+  back sample-identical to the decode.
 - `compute_peaks(data, columns) -> np.ndarray`
   Mono mixdown, absolute peak per column, normalised 0–1, for drawing. Handles
   clips shorter than `columns` and all-silence input.
