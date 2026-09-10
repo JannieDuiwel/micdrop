@@ -1,6 +1,6 @@
 import numpy as np
 
-from micdrop.audio import trim_segment
+from micdrop.audio import trim_segment, compute_peaks, rebucket_peaks
 
 
 def _ramp(n, channels=2):
@@ -91,3 +91,67 @@ class TestTrimSegment:
         data = _ramp(48000)
         out = trim_segment(data, 48000, 100, 101)  # 1 ms, shorter than the fade
         assert out.shape[0] >= 1
+
+
+class TestComputePeaks:
+    def test_returns_exactly_the_requested_column_count(self):
+        data = np.ones((10_000, 2), dtype="float32")
+        assert compute_peaks(data, 200).shape == (200,)
+
+    def test_short_clip_still_fills_every_column(self):
+        data = np.ones((7, 2), dtype="float32")  # fewer frames than columns
+        assert compute_peaks(data, 200).shape == (200,)
+
+    def test_values_stay_within_zero_and_one(self):
+        rng = np.random.default_rng(0)
+        data = rng.uniform(-1.0, 1.0, size=(5000, 2)).astype("float32")
+        peaks = compute_peaks(data, 100)
+        assert peaks.min() >= 0.0
+        assert peaks.max() <= 1.0
+
+    def test_silence_gives_all_zeros_and_does_not_divide_by_zero(self):
+        data = np.zeros((1000, 2), dtype="float32")
+        peaks = compute_peaks(data, 50)
+        assert np.all(peaks == 0.0)
+
+    def test_constant_amplitude_normalises_to_one(self):
+        data = np.full((1000, 2), 0.25, dtype="float32")
+        peaks = compute_peaks(data, 50)
+        assert np.allclose(peaks, 1.0)
+
+    def test_loud_burst_reads_louder_than_quiet_tail(self):
+        data = np.zeros((1000, 2), dtype="float32")
+        data[:500] = 1.0
+        data[500:] = 0.1
+        peaks = compute_peaks(data, 10)
+        assert peaks[0] > peaks[-1]
+
+    def test_empty_clip_returns_zeros(self):
+        assert np.all(compute_peaks(np.zeros((0, 2), dtype="float32"), 20) == 0.0)
+
+    def test_zero_columns_returns_empty(self):
+        assert compute_peaks(np.ones((100, 2), dtype="float32"), 0).shape == (0,)
+
+
+class TestRebucketPeaks:
+    def test_returns_requested_width(self):
+        peaks = np.linspace(0.0, 1.0, 2000, dtype="float32")
+        assert len(rebucket_peaks(peaks, 640)) == 640
+
+    def test_returns_plain_floats_not_numpy(self):
+        peaks = np.linspace(0.0, 1.0, 2000, dtype="float32")
+        out = rebucket_peaks(peaks, 10)
+        assert all(type(v) is float for v in out)
+
+    def test_widening_beyond_source_length_does_not_crash(self):
+        peaks = np.array([0.0, 1.0], dtype="float32")
+        assert len(rebucket_peaks(peaks, 50)) == 50
+
+    def test_keeps_the_loudest_sample_in_each_bucket(self):
+        peaks = np.zeros(100, dtype="float32")
+        peaks[3] = 1.0  # a spike inside the first bucket of 10
+        out = rebucket_peaks(peaks, 10)
+        assert out[0] == 1.0
+
+    def test_zero_width_returns_empty(self):
+        assert rebucket_peaks(np.ones(10, dtype="float32"), 0) == []

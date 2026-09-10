@@ -200,6 +200,49 @@ def trim_segment(
     return seg
 
 
+def compute_peaks(data: np.ndarray, columns: int) -> np.ndarray:
+    """Absolute peak per column, normalised to 0..1, for drawing a waveform.
+
+    Normalising to the clip's own maximum means a quiet clip still fills the
+    display, which is what you want when hunting for the start of the audio.
+    """
+    if columns < 1:
+        return np.zeros(0, dtype="float32")
+    n = data.shape[0]
+    if n == 0:
+        return np.zeros(columns, dtype="float32")
+
+    mono = data.mean(axis=1) if data.ndim > 1 else data
+    cols = min(columns, n)
+    per = int(np.ceil(n / cols))
+    pad = per * cols - n
+    if pad:
+        mono = np.concatenate([mono, np.zeros(pad, dtype="float32")])
+
+    peaks = np.abs(mono.reshape(cols, per)).max(axis=1)
+    top = float(peaks.max())
+    if top > 0:
+        peaks = peaks / top
+    if cols < columns:  # clip shorter than the requested resolution
+        peaks = np.repeat(peaks, int(np.ceil(columns / cols)))[:columns]
+    return peaks.astype("float32")
+
+
+def rebucket_peaks(peaks: np.ndarray, width: int) -> list[float]:
+    """Reduce a peak envelope to `width` columns, keeping the loudest per bucket.
+
+    Peaks are computed once at high resolution and re-bucketed on every redraw,
+    so a resize drag never re-reads the audio. Returns plain floats to keep
+    numpy out of the UI layer.
+    """
+    if width < 1 or peaks.size == 0:
+        return []
+    edges = np.minimum(
+        (np.arange(width) * (peaks.size / width)).astype(int), peaks.size - 1
+    )
+    return [float(v) for v in np.maximum.reduceat(peaks, edges)]
+
+
 class _Voice:
     """A persistent output stream to one device, fed by a swappable buffer."""
 
