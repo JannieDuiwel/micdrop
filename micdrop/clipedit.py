@@ -18,6 +18,7 @@ MIN_RANGE_MS = 50  # handles may not collapse closer than this
 NUDGE_MS = 10  # arrow-key step
 NUDGE_COARSE_MS = 100  # shift+arrow step
 HANDLE_GRAB_PX = 8  # click this close to a handle to grab it
+HANDLE_W = 2  # stroke width of a trim handle
 WAVE_HEIGHT = 110
 
 
@@ -42,6 +43,22 @@ def trim_badge(start_ms: int, end_ms: int) -> str:
     if start_ms > 0:
         return f"\u2702 from {format_ms(start_ms)}"
     return f"\u2702 to {format_ms(end_ms)}"
+
+
+def handle_draw_x(x: int, width: int, stroke: int = HANDLE_W) -> int:
+    """Where to stroke a trim handle so its whole width lands on the canvas.
+
+    Tk centres a line on its coordinate, so a 2 px handle at x=0 spills half
+    its width off the left edge and survives as a single pixel flush against
+    the border - which reads as frame, not as a handle. Only the *drawn*
+    position moves: the ms-to-x mapping stays exact, so hit-testing and
+    dragging are unaffected.
+    """
+    half = stroke // 2
+    lo, hi = half, width - 1 - half
+    if hi < lo:  # canvas too narrow to inset - just stay on it
+        return max(0, min(x, max(0, width - 1)))
+    return max(lo, min(x, hi))
 
 
 class ClipEditor(tk.Toplevel):
@@ -223,7 +240,8 @@ class ClipEditor(tk.Toplevel):
         if ix1 > ix0:
             c.create_polygon(self._envelope(cols, ix0, ix1, h), fill=self.p["accent"], outline="")
         for x in (ix0, ix1):
-            c.create_line(x, 0, x, h, fill=self.p["text"], width=2)
+            xd = handle_draw_x(x, w)
+            c.create_line(xd, 0, xd, h, fill=self.p["text"], width=HANDLE_W)
 
     def _update_times(self) -> None:
         kept = max(0, self._end - self._start) / 1000.0

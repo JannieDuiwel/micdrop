@@ -1,7 +1,7 @@
 import numpy as np
 
 from micdrop.audio import Player, trim_segment, compute_peaks, rebucket_peaks
-from micdrop.clipedit import format_ms, trim_badge
+from micdrop.clipedit import HANDLE_W, format_ms, handle_draw_x, trim_badge
 
 
 def _ramp(n, channels=2):
@@ -272,3 +272,39 @@ class TestTrimBadge:
 
     def test_only_the_end_trimmed(self):
         assert trim_badge(0, 2900) == "\u2702 to 0:02.9"
+
+
+class TestHandleDrawX:
+    """A trim handle is a stroked line, so its centre must sit far enough in
+    that the whole stroke lands on the canvas. A handle at x=0 was rendering
+    at half width, flush against the border, and read as not being there.
+    """
+
+    def test_left_edge_handle_is_inset_so_the_whole_stroke_shows(self):
+        assert handle_draw_x(0, 676) == HANDLE_W // 2
+
+    def test_right_edge_handle_is_inset_so_the_whole_stroke_shows(self):
+        assert handle_draw_x(675, 676) == 676 - 1 - HANDLE_W // 2
+
+    def test_handle_away_from_the_edges_is_left_alone(self):
+        assert handle_draw_x(135, 676) == 135
+        assert handle_draw_x(540, 676) == 540
+
+    def test_both_edges_are_inset_by_the_same_amount(self):
+        width = 676
+        left_inset = handle_draw_x(0, width) - 0
+        right_inset = (width - 1) - handle_draw_x(width - 1, width)
+        assert left_inset == right_inset
+
+    def test_a_wider_stroke_insets_further(self):
+        assert handle_draw_x(0, 100, stroke=6) == 3
+        assert handle_draw_x(99, 100, stroke=6) == 96
+
+    def test_canvas_too_narrow_to_inset_still_returns_an_on_canvas_x(self):
+        for width in (1, 2, 3):
+            x = handle_draw_x(0, width)
+            assert 0 <= x <= max(0, width - 1)
+
+    def test_out_of_range_input_is_pulled_back_on_canvas(self):
+        assert handle_draw_x(-50, 676) == HANDLE_W // 2
+        assert handle_draw_x(9999, 676) == 676 - 1 - HANDLE_W // 2
