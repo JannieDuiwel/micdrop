@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, ttk
 
 import sounddevice as sd
 
@@ -254,14 +254,14 @@ class MicDropApp:
         self.clip_menu = tk.Menu(self.root, tearoff=0)
         self.clip_menu.add_command(label="Edit clip…", command=self._menu_edit)
         self.clip_menu.add_command(label="Play", command=self._menu_play)
-        self.clip_menu.add_command(label="Set / change hotkey…", command=self._menu_set_hotkey)
+        self.clip_menu.add_command(label="Set / change hotkey…", command=self._menu_edit)
         self.clip_menu.add_command(label="Clear hotkey", command=self._menu_clear_hotkey)
-        self.clip_menu.add_command(label="Set volume…", command=self._menu_set_volume)
+        self.clip_menu.add_command(label="Set volume…", command=self._menu_edit)
         self.clip_menu.add_separator()
         self.clip_menu.add_command(label="Move up", command=lambda: self._menu_move(-1))
         self.clip_menu.add_command(label="Move down", command=lambda: self._menu_move(1))
         self.clip_menu.add_separator()
-        self.clip_menu.add_command(label="Rename…", command=self._menu_rename)
+        self.clip_menu.add_command(label="Rename…", command=self._menu_edit)
         self.clip_menu.add_command(label="Remove", command=self._menu_remove)
 
         self._build_clip_buttons()
@@ -600,9 +600,6 @@ class MicDropApp:
     def _menu_play(self) -> None:
         self.trigger_play(self.cfg.clips[self._menu_index])
 
-    def _menu_set_hotkey(self) -> None:
-        self._capture_hotkey(self._menu_index)
-
     def _menu_clear_hotkey(self) -> None:
         clip = self.cfg.clips[self._menu_index]
         if clip.hotkey:
@@ -612,37 +609,11 @@ class MicDropApp:
             self._build_clip_buttons()
             self._apply_hotkeys()
 
-    def _menu_set_volume(self) -> None:
-        clip = self.cfg.clips[self._menu_index]
-        cur = int(round(getattr(clip, "volume", 1.0) * 100))
-        val = simpledialog.askinteger(
-            "Clip volume",
-            f"Volume for “{clip.label}” (%)\n100 = normal, up to 200 to boost:",
-            initialvalue=cur,
-            minvalue=0,
-            maxvalue=200,
-            parent=self.root,
-        )
-        if val is not None:
-            clip.volume = val / 100.0
-            self._save()
-            self._build_clip_buttons()
-
     def _menu_move(self, delta: int) -> None:
         i = self._menu_index
         j = i + delta
         if 0 <= j < len(self.cfg.clips):
             self.cfg.clips[i], self.cfg.clips[j] = self.cfg.clips[j], self.cfg.clips[i]
-            self._save()
-            self._build_clip_buttons()
-
-    def _menu_rename(self) -> None:
-        clip = self.cfg.clips[self._menu_index]
-        new = simpledialog.askstring(
-            "Rename clip", "Label:", initialvalue=clip.label, parent=self.root
-        )
-        if new and new.strip():
-            clip.label = new.strip()
             self._save()
             self._build_clip_buttons()
 

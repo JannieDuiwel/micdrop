@@ -59,13 +59,20 @@ handling monitoring via A1 you can leave the app's monitor output on **None**.
 
 - **Click** a clip tile or press its **global hotkey** to play. **Space** or the Stop
   hotkey (default `Ctrl+Alt+S`) cuts playback.
-- **Master volume** scales all clips; set a single clip's level with
-  **right-click ▸ Set volume…**.
+- **Master volume** scales all clips; set a single clip's level in
+  **right-click ▸ Edit clip…**.
 - **Delay** + **Chime before clip** (top-right) add a pre-roll to every clip — order is
   **chime → delay → clip**.
 - **Search** filters tiles (**Ctrl+F**); the grid reflows to the window width.
-- **Right-click** a tile for: Play, Set/change hotkey, Clear hotkey, Set volume, Move
-  up/down, Rename, Remove.
+- **Right-click** a tile for: Edit clip, Play, Clear hotkey, Move up/down, Remove.
+  *Rename…*, *Set volume…* and *Set / change hotkey…* are shortcuts into the same
+  edit screen.
+- **Edit clip…** opens one screen for everything about a clip — label, volume,
+  hotkey, and a **trim**: drag the handles over the waveform to choose which part
+  of the clip plays. Arrow keys nudge the grabbed handle 10 ms (Shift = 100 ms).
+  **Preview** plays the trimmed range through your **monitor** device only, so you
+  can re-cut a clip mid-game without your teammates hearing it. **Reset trim**
+  puts the whole clip back. Trimmed tiles show a `✂` badge.
 - **View ▸ Dark / Light** switches the theme.
 - Settings save automatically — to `config.json` next to the app, or
   `%APPDATA%\MicDrop\config.json` in the packaged build.
