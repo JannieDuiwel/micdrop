@@ -172,6 +172,10 @@ def trim_segment(
 ) -> np.ndarray:
     """Return the [start_ms, end_ms) slice of `data`, faded at the cut edges.
 
+    `data` is 2-D `(frames, channels)`, matching what `Player._prepare`
+    always hands it -- unlike `compute_peaks` in this module, this does not
+    accept 1-D mono data.
+
     `end_ms` of 0 (or past the tail) means "to the natural end". Only an edge
     that was actually cut is faded, so an untrimmed clip comes back
     sample-identical — an airhorn should not ramp up over its first 5 ms.

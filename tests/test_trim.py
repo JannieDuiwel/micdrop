@@ -5,7 +5,7 @@ from micdrop.clipedit import format_ms, trim_badge
 
 
 def _ramp(n, channels=2):
-    """Frames 0..n-1, every channel identical, values 1.0 (easy to spot fades)."""
+    """n frames, every channel identical, all samples 1.0 (easy to spot fades)."""
     return np.ones((n, channels), dtype="float32")
 
 
@@ -92,6 +92,12 @@ class TestTrimSegment:
         data = _ramp(48000)
         out = trim_segment(data, 48000, 100, 101)  # 1 ms, shorter than the fade
         assert out.shape[0] >= 1
+
+    def test_empty_input_returns_a_fresh_array_and_does_not_raise(self):
+        data = np.zeros((0, 2), dtype="float32")
+        out = trim_segment(data, 48000, 0, 0)
+        assert out.shape == (0, 2)
+        assert out is not data
 
 
 class TestComputePeaks:

@@ -526,7 +526,12 @@ class MicDropApp:
         if badges:
             name.pack(fill="x", padx=10, pady=(12, 2))
             badge = tk.Label(
-                tile, text="   ".join(badges), bg=p["surface"], fg=p["muted"], font=theme.FONT_BADGE
+                tile,
+                text="   ".join(badges),
+                bg=p["surface"],
+                fg=p["muted"],
+                font=theme.FONT_BADGE,
+                wraplength=wraplen,
             )
             badge.pack(pady=(0, 12))
             widgets.append(badge)
@@ -581,8 +586,11 @@ class MicDropApp:
 
     def _on_mousewheel(self, event: tk.Event) -> None:
         # bind_all reaches every window in the app, dialogs included; only the
-        # main window's wheel should scroll the clip grid.
-        if event.widget.winfo_toplevel() is not self.root:
+        # main window's wheel should scroll the clip grid. Tkinter sometimes
+        # hands us the raw window-path string instead of a widget object when
+        # it cannot resolve one, and a string has no winfo_toplevel.
+        get_toplevel = getattr(event.widget, "winfo_toplevel", None)
+        if get_toplevel is None or get_toplevel() is not self.root:
             return
         self.canvas.yview_scroll(int(-event.delta / 120), "units")
 
@@ -900,12 +908,14 @@ class MicDropApp:
 
     def _on_hotkey_assigned(self, target, hk: str, prev: bool) -> None:
         self._capturing = False
-        if self._editor is not None:
-            self._editor.refresh_hotkey()
         if self._hotkeys_restore_pending:
             self._hotkeys_restore_pending = False  # the editor already restored
         else:
-            self.hotkeys.set_enabled(prev)
+            # A capture that completes while the editor is still open must
+            # leave hotkeys suspended, not flip them back on underneath the
+            # open dialog -- the spec has them suspended for as long as it
+            # is up, regardless of what "prev" captured before it opened.
+            self.hotkeys.set_enabled(prev and self._editor is None)
         if hk and hk.lower() != "esc":
             if target == "stop":
                 self.cfg.stop_hotkey = hk
@@ -918,10 +928,14 @@ class MicDropApp:
             self._build_clip_buttons()
             self._apply_hotkeys()
             self._set_status(f"Hotkey set: {hk}", 3)
-            if self._editor is not None:
-                self._editor.refresh_hotkey()
         else:
             self._set_status("Hotkey assignment cancelled", 2)
+        # A single call, after the clip is (maybe) mutated, covers both
+        # outcomes: the label shows the new combo on success or the old one
+        # back on cancel, and either way the dialog's "press a key now" hint
+        # must not survive a capture that has already finished.
+        if self._editor is not None:
+            self._editor.refresh_hotkey()
 
     # ===================================================================
     # Status + main loop pump

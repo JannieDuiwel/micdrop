@@ -59,7 +59,7 @@ class ClipEditor(tk.Toplevel):
         self._start = 0
         self._end = 0
         self._drag: str | None = None
-        self._grabbed = "start"  # which handle the arrow keys move
+        self._grabbed: str | None = None  # which handle arrows nudge; unset until the user grabs one
         self._capture_is_mine = False  # did WE start the capture that is in flight?
 
         self.title(f"Edit clip \u2014 {self.clip.label}")
@@ -72,8 +72,16 @@ class ClipEditor(tk.Toplevel):
         self._hotkeys_were = app.hotkeys.enabled
         app.hotkeys.set_enabled(False)
 
-        self._build()
-        self._load_audio()
+        try:
+            self._build()
+            self._load_audio()
+        except Exception:
+            # Construction failed partway through: hotkeys must not stay
+            # suspended with no window left to ever restore them, and a
+            # half-built Toplevel must not linger on screen.
+            self.app.hotkeys.set_enabled(self._hotkeys_were)
+            self.destroy()
+            raise
 
         self.protocol("WM_DELETE_WINDOW", self._close)
         self.bind("<Escape>", self._on_escape)
@@ -123,6 +131,14 @@ class ClipEditor(tk.Toplevel):
         self.vol_label = ttk.Label(row, width=5, text=f"{int(round(self.clip.volume * 100))}%")
         self.vol_label.pack(side="left")
 
+        # Created (not yet packed) ahead of the Hotkey row: refresh_hotkey()
+        # below touches self.hint, and it must already exist.
+        self.hint = ttk.Label(outer, style="Muted.TLabel", text="")
+        # Wrap to whatever width we're actually given rather than a fixed
+        # guess, so a long "Preview failed: <path>" wraps instead of
+        # widening the whole dialog.
+        self.hint.bind("<Configure>", lambda e: self.hint.configure(wraplength=e.width))
+
         row = ttk.Frame(outer)
         row.pack(fill="x", pady=(10, 0))
         ttk.Label(row, text="Hotkey").pack(side="left")
@@ -132,7 +148,6 @@ class ClipEditor(tk.Toplevel):
         ttk.Button(row, text="Set\u2026", command=self._set_hotkey).pack(side="right", padx=(0, 6))
         self.refresh_hotkey()
 
-        self.hint = ttk.Label(outer, style="Muted.TLabel", text="")
         self.hint.pack(fill="x", pady=(10, 0))
 
         row = ttk.Frame(outer)
@@ -268,6 +283,8 @@ class ClipEditor(tk.Toplevel):
             return None
         if self._peaks is None:
             return None
+        if self._grabbed is None:
+            return None  # nothing grabbed yet; ignore rather than nudging a handle unasked
         step = NUDGE_COARSE_MS if (event.state & 0x0001) else NUDGE_MS
         current = self._start if self._grabbed == "start" else self._end
         self._set_handle(self._grabbed, current + direction * step)
@@ -294,8 +311,17 @@ class ClipEditor(tk.Toplevel):
         self.vol_label.configure(text=f"{int(round(self.vol_var.get()))}%")
 
     def refresh_hotkey(self) -> None:
-        """Re-read the clip's hotkey. Called by main.py when a capture finishes."""
+        """Re-read the clip's hotkey. Called by main.py on both outcomes of a
+        capture -- success (the combo changed) or cancel (it did not).
+
+        The label alone tells the story, so the hint is cleared
+        unconditionally here: otherwise "press a key now" would survive a
+        capture that already finished, and further keystrokes would just
+        silently not register.
+        """
         self.hotkey_label.configure(text=self.clip.hotkey or "none")
+        self._capture_is_mine = False  # our capture, if any, is no longer in flight
+        self._set_hint("")
 
     def _set_hotkey(self) -> None:
         # _capture_hotkey silently no-ops when a capture is already running
@@ -343,19 +369,30 @@ class ClipEditor(tk.Toplevel):
         self._close()
 
     def _close(self) -> None:
-        self._apply()
+        # A capture WE started must be cancelled by the user (Esc) before the
+        # window can come down. Escape genuinely ends the OS-level capture,
+        # so the user always has a way out -- but closing here while it is
+        # still running would leave the capture thread blocked in
+        # keyboard.read_hotkey() after the dialog is gone, and the next key
+        # combination pressed anywhere in the OS would silently become this
+        # clip's hotkey, stripped from whatever clip owned it by
+        # de-duplication.
         if self._capture_is_mine and getattr(self.app, "_capturing", False):
-            # A capture WE started is still running. Its completion handler
-            # would restore the state it sampled while we had hotkeys
-            # suspended, undoing the line below; tell it we have already
-            # done the restoring. A capture we never started (e.g. one
-            # pending from the main window) is not ours to claim -- its own
-            # completion handler must still run its own restore.
-            self.app._hotkeys_restore_pending = True
-        self.app.hotkeys.set_enabled(self._hotkeys_were)
-        self.app._editor = None
-        self.app._save()
-        self.app._build_clip_buttons()
-        self.app._apply_hotkeys()
-        self.grab_release()
-        self.destroy()
+            self._set_hint("Press Esc to cancel the hotkey capture first.")
+            return
+        self._apply()
+        # grab_release()/destroy() must run even if the app-side work below
+        # raises, or the window is stuck holding an application-wide grab
+        # with app._editor already None -- the main window becomes
+        # unusable and there is no way to reopen this editor or quit short
+        # of a restart.
+        try:
+            self.app.player.stop()  # a Preview must not outlive the dialog it was started from
+            self.app.hotkeys.set_enabled(self._hotkeys_were)
+            self.app._editor = None
+            self.app._save()
+            self.app._build_clip_buttons()
+            self.app._apply_hotkeys()
+        finally:
+            self.grab_release()
+            self.destroy()
