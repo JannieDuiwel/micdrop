@@ -11,7 +11,9 @@ env/
 
 # PyInstaller build artifacts
 build/
-dist/
+dist/*
+# ...except the shipped single-file build, which is kept in the repo
+!dist/MicDrop.exe
 
 # Local config — contains personal absolute file paths and device names
 config.json

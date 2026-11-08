@@ -10,3 +10,4 @@
 *.mp3 binary
 *.ogg binary
 *.flac binary
+*.exe binary
