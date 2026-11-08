@@ -91,6 +91,35 @@ def find_virtual_mic(devices: list[DeviceInfo]) -> DeviceInfo | None:
     return find_sonar_input(devices) or find_voicemeeter_input(devices)
 
 
+_MME_NAME_LEN = 31  # MME cuts device names to this many characters
+
+
+def _same_device(a: str, b: str) -> bool:
+    """True if two host-API entries name the same physical device."""
+    if a == b:
+        return True
+    short, long_ = sorted((a, b), key=len)
+    return len(short) >= _MME_NAME_LEN and long_.startswith(short)
+
+
+def device_candidates(
+    devices: list[DeviceInfo], preferred: list[DeviceInfo | None]
+) -> list[DeviceInfo]:
+    """Devices to try opening, in order: each preferred device followed by the
+    same device on the other host APIs (WASAPI can refuse a device that
+    DirectSound or MME will open). Duplicates and Nones are dropped."""
+    out: list[DeviceInfo] = []
+    seen: set[int] = set()
+    for p in preferred:
+        if p is None:
+            continue
+        for d in [p] + [d for d in devices if _same_device(d.name, p.name)]:
+            if d.index not in seen:
+                seen.add(d.index)
+                out.append(d)
+    return out
+
+
 class RingBuffer:
     """Fixed-capacity float32 frame buffer; one writer thread, one reader thread.
 
@@ -265,7 +294,11 @@ class _Voice:
             dtype="float32",
             callback=self._callback,
         )
-        self.stream.start()
+        try:
+            self.stream.start()
+        except Exception:
+            self.stream.close()
+            raise
 
     def _callback(self, outdata, frames, time_info, status) -> None:  # noqa: ANN001
         with self._lock:
@@ -327,6 +360,7 @@ class Player:
         with self._lock:
             if self._primary is not None:
                 self._primary.close()
+                self._primary = None  # never leave a closed stream behind if the open fails
             self._primary = self._make_voice(index)
 
     def set_monitor_device(self, index: int | None) -> None:

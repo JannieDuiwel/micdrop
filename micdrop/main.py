@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+import traceback
 from tkinter import filedialog, messagebox, ttk
 
 import sounddevice as sd
@@ -662,28 +663,53 @@ class MicDropApp:
         return None
 
     def _init_device(self) -> None:
-        target = self._resolve_device(self.cfg.output_device_name, self.cfg.output_device_hostapi)
-        if target is None:
-            target = audio.find_virtual_mic(self._devices)
-            if target is None:
-                self._device_warning = (
-                    "SteelSeries Sonar not found — clips play locally only. "
-                    "Install SteelSeries Sonar (or VoiceMeeter) — see Help ▸ Setup guide — "
-                    "so others hear them."
-                )
-        if target is None:
-            target = self._default_output_device()
-        if target is not None:
-            self._apply_device(target)
+        saved = self._resolve_device(self.cfg.output_device_name, self.cfg.output_device_hostapi)
+        virtual = audio.find_virtual_mic(self._devices)
+        if saved is None and virtual is None:
+            self._device_warning = (
+                "SteelSeries Sonar not found — clips play locally only. "
+                "Install SteelSeries Sonar (or VoiceMeeter) — see Help ▸ Setup guide — "
+                "so others hear them."
+            )
+        # A device that is listed can still refuse to open (a VoiceMeeter strip that
+        # is disabled, a device another app holds exclusively, a format WASAPI
+        # rejects), so try a chain of candidates instead of crashing on the first.
+        other_vm = [
+            d for d in self._devices
+            if "voicemeeter" in d.name.lower() and "input" in d.name.lower()
+        ]
+        candidates = audio.device_candidates(
+            self._devices, [saved, virtual, *other_vm, self._default_output_device()]
+        )
+        if not candidates:
+            return
+        errors: list[str] = []
+        for d in candidates:
+            try:
+                self._apply_device(d)
+            except Exception as exc:  # noqa: BLE001 - any open failure: try the next one
+                errors.append(f"{d.display_name}: {exc}")
+                continue
+            if errors:
+                self._set_status(f"Couldn't open {errors[0]} — using {d.display_name}", 10)
+            return
+        self.device_var.set("")
+        self._device_warning = (
+            "Couldn't open any output device — pick one under Mic output. "
+            f"({errors[0]})"
+        )
 
     def _init_monitor(self) -> None:
         d = self._resolve_device(self.cfg.monitor_device_name, self.cfg.monitor_device_hostapi)
         if d is not None:
-            self.player.set_monitor_device(d.index)
-            self.monitor_var.set(d.display_name)
-        else:
-            self.player.set_monitor_device(None)
-            self.monitor_var.set(self.MONITOR_NONE)
+            try:
+                self.player.set_monitor_device(d.index)
+                self.monitor_var.set(d.display_name)
+                return
+            except Exception as exc:  # noqa: BLE001 - start without a monitor instead
+                self._set_status(f"Couldn't open monitor {d.display_name}: {exc}", 8)
+        self.player.set_monitor_device(None)
+        self.monitor_var.set(self.MONITOR_NONE)
 
     def _default_output_device(self) -> audio.DeviceInfo | None:
         out_idx = None
@@ -712,7 +738,12 @@ class MicDropApp:
             was_routing = self.router.running
             if was_routing:
                 self._stop_route()
-            self._apply_device(d)
+            try:
+                self._apply_device(d)
+            except Exception as exc:  # noqa: BLE001 - device listed but won't open
+                self.device_var.set("")
+                self._set_status(f"Couldn't open {d.display_name}: {exc}", 8)
+                return
             self.cfg.output_device_name = d.name
             self.cfg.output_device_hostapi = d.hostapi
             self._save()
@@ -1048,9 +1079,28 @@ class MicDropApp:
             self.root.destroy()
 
 
+def _startup_failed(root: tk.Tk, details: str) -> None:
+    """Last resort: save the traceback and say where, instead of a bare crash dialog."""
+    log_path = os.path.join(os.path.dirname(config.CONFIG_PATH), "crash.log")
+    try:
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write(details)
+        where = f"\n\nFull details were saved to:\n{log_path}"
+    except OSError:
+        where = ""
+    last = details.strip().splitlines()[-1] if details.strip() else "unknown error"
+    root.withdraw()
+    messagebox.showerror("MicDrop couldn't start", f"{last}{where}", parent=root)
+    root.destroy()
+
+
 def main() -> None:
     root = tk.Tk()
-    MicDropApp(root)
+    try:
+        MicDropApp(root)
+    except Exception:  # noqa: BLE001 - anything that escapes startup
+        _startup_failed(root, traceback.format_exc())
+        return
     root.mainloop()
 
 
